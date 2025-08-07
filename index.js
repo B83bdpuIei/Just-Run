@@ -117,7 +117,7 @@ client.on(Events.InteractionCreate, async interaction => {
     // --- CORRECCIÓN: Manejar las interacciones por tipo para evitar el bucle ---
     if (interaction.isChatInputCommand()) {
         const { commandName } = interaction;
-
+        
         if (commandName === 'start_comp') {
             await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
@@ -208,7 +208,7 @@ client.on(Events.InteractionCreate, async interaction => {
             }
 
             const numeroPuesto = parseInt(lineas[lineaEncontrada].trim().split('.')[0]);
-
+            
             if (numeroPuesto >= 35) {
                 lineas[lineaEncontrada] = `${numeroPuesto}. X`;
             } else {
@@ -222,7 +222,7 @@ client.on(Events.InteractionCreate, async interaction => {
             }
 
             await interaction.editReply(`✅ Usuario <@${usuarioARemover.id}> eliminado del puesto **${numeroPuesto}**.`);
-
+            
         } else if (commandName === 'add_user_compo') {
             await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
@@ -230,7 +230,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.editReply('Este comando solo se puede usar dentro de un hilo de party.');
                 return;
             }
-
+            
             const usuarioAAgregar = interaction.options.getUser('usuario');
             const puestoAAgregar = interaction.options.getInteger('puesto');
             const hilo = interaction.channel;
@@ -240,11 +240,11 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.editReply('No se pudo encontrar el mensaje principal de la party.');
                 return;
             }
-
+            
             let lineas = mensajePrincipal.content.split('\n');
             const regexUsuario = new RegExp(`<@${usuarioAAgregar.id}>`);
             const lineaAnteriorIndex = lineas.findIndex(linea => regexUsuario.test(linea));
-
+            
             if (lineaAnteriorIndex !== -1) {
                 const numeroPuestoAnterior = parseInt(lineas[lineaAnteriorIndex].trim().split('.')[0]);
                 if (numeroPuestoAnterior >= 35) {
@@ -255,12 +255,12 @@ client.on(Events.InteractionCreate, async interaction => {
             }
 
             const lineaNuevaIndex = lineas.findIndex(linea => linea.startsWith(`${puestoAAgregar}.`));
-
+            
             if (lineaNuevaIndex === -1) {
                 await interaction.editReply(`El puesto **${puestoAAgregar}** no es válido.`);
                 return;
             }
-
+            
             if (lineas[lineaNuevaIndex].includes('<@')) {
                 await interaction.editReply(`El puesto **${puestoAAgregar}** ya está ocupado.`);
                 return;
@@ -268,20 +268,20 @@ client.on(Events.InteractionCreate, async interaction => {
 
             if (puestoAAgregar >= 35) {
                 const preguntaRol = await hilo.send(`<@${interaction.user.id}>, has apuntado a <@${usuarioAAgregar.id}> en el puesto **${puestoAAgregar}**. ¿Qué rol vas a ir?`);
-
+                
                 const filtro = m => m.author.id === interaction.user.id;
                 const colector = hilo.createMessageCollector({ filter: filtro, max: 1, time: 60000 });
 
                 colector.on('collect', async m => {
                     await preguntaRol.delete().catch(() => {});
                     await m.delete().catch(() => {});
-
+                    
                     const rol = m.content;
                     const nuevoValor = `${puestoAAgregar}. ${rol} <@${usuarioAAgregar.id}>`;
                     lineas[lineaNuevaIndex] = nuevoValor;
                     await mensajePrincipal.edit(lineas.join('\n'));
                     await interaction.editReply(`✅ Usuario <@${usuarioAAgregar.id}> añadido al puesto **${puestoAAgregar}** como **${rol}**.`);
-
+                    
                     if (hilosMonitoreados[hilo.id]) {
                         hilosMonitoreados[hilo.id].participantes.set(usuarioAAgregar.id, puestoAAgregar);
                     }
@@ -302,7 +302,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 if (hilosMonitoreados[hilo.id]) {
                     hilosMonitoreados[hilo.id].participantes.set(usuarioAAgregar.id, puestoAAgregar);
                 }
-
+                
                 await interaction.editReply(`✅ Usuario <@${usuarioAAgregar.id}> añadido al puesto **${puestoAAgregar}**.`);
             }
         }
@@ -351,7 +351,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     new ActionRowBuilder().addComponents(tiempoFinalizacionInput),
                     new ActionRowBuilder().addComponents(mensajeEncabezadoInput)
                 );
-
+                
                 await interaction.showModal(modal);
             } catch (error) {
                 console.error('Error al obtener las compos:', error);
@@ -362,7 +362,7 @@ client.on(Events.InteractionCreate, async interaction => {
         if (interaction.customId === 'add_compo_modal') {
             const compoName = interaction.fields.getTextInputValue('compo_name');
             const compoContent = interaction.fields.getTextInputValue('compo_content');
-
+            
             if (!db) {
                 await interaction.reply({ content: 'Error: La base de datos no está disponible.', flags: [MessageFlags.Ephemeral] });
                 return;
@@ -445,7 +445,7 @@ ${compoContent}`;
                                 await canalHilo.setLocked(true);
                                 await canalHilo.send('¡Las inscripciones han terminado! Este hilo ha sido bloqueado y ya no se pueden añadir más participantes.');
                             }
-
+                            
                             delete hilosMonitoreados[hilo.id];
                         } catch (error) {
                             console.error(`Error al bloquear el hilo ${hilo.id}:`, error);
@@ -461,11 +461,11 @@ ${compoContent}`;
         if (interaction.author.bot || !interaction.channel.isThread() || !hilosMonitoreados[interaction.channel.id]) {
             return;
         }
-
+        
         const { channel, author, content } = interaction;
         const hiloInfo = hilosMonitoreados[channel.id];
         const numero = parseInt(content);
-
+    
         if (isNaN(numero) || numero < 1 || numero > 50) {
             return;
         }
@@ -476,7 +476,7 @@ ${compoContent}`;
             const mensajeAEditar = await canalPrincipal.messages.fetch(hiloInfo.mensajeId);
             let lineas = mensajeAEditar.content.split('\n');
             const oldSpot = hiloInfo.participantes.get(author.id);
-
+    
             if (oldSpot) {
                 const lineaAnterior = lineas.findIndex(linea => linea.startsWith(`${oldSpot}.`));
                 if (lineaAnterior !== -1) {
@@ -488,16 +488,16 @@ ${compoContent}`;
                     hiloInfo.participantes.delete(author.id);
                 }
             }
-
+    
             const indiceLinea = lineas.findIndex(linea => linea.startsWith(`${numero}.`));
-
+    
             if (indiceLinea !== -1) {
                 if (lineas[indiceLinea].includes('<@')) {
                     const mensajeOcupado = await channel.send(`<@${author.id}>, ese puesto ya está ocupado. Intenta con otro número.`);
                     setTimeout(() => mensajeOcupado.delete().catch(() => {}), 10000);
                     return;
                 }
-
+    
                 if (numero <= 34) {
                     const lineaOriginal = lineas[indiceLinea];
                     const nuevoValor = `${lineaOriginal} <@${author.id}>`;
@@ -507,10 +507,10 @@ ${compoContent}`;
                     await channel.send(`<@${author.id}>, te has apuntado en el puesto **${numero}** con éxito.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
                 } else {
                     const preguntaRol = await channel.send(`<@${author.id}>, te has apuntado en el puesto **${numero}**. ¿Qué rol vas a ir?`);
-
+                    
                     const filtro = m => m.author.id === author.id;
                     const colector = channel.createMessageCollector({ filter: filtro, max: 1, time: 60000 });
-
+    
                     colector.on('collect', async m => {
                         await preguntaRol.delete().catch(() => {});
                         await m.delete().catch(() => {});
@@ -521,7 +521,7 @@ ${compoContent}`;
                         hiloInfo.participantes.set(author.id, numero);
                         await channel.send(`<@${author.id}>, te has apuntado en el puesto **${numero}** como **${rol}**.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
                     });
-
+    
                     colector.on('end', collected => {
                         if (collected.size === 0) {
                             channel.send(`<@${author.id}>, no respondiste a tiempo. Por favor, vuelve a intentarlo.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
