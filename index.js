@@ -352,7 +352,6 @@ client.on(Events.InteractionCreate, async interaction => {
                     new ActionRowBuilder().addComponents(mensajeEncabezadoInput)
                 );
                 
-                // NOTA: 'showModal' es una respuesta válida, no necesitas deferir
                 await interaction.showModal(modal);
             } catch (error) {
                 console.error('Error al obtener las compos:', error);
@@ -383,7 +382,10 @@ client.on(Events.InteractionCreate, async interaction => {
         }
 
         if (interaction.customId.startsWith('start_comp_modal_')) {
-            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+            // CORRECCIÓN: Responde inmediatamente con un mensaje temporal y privado para evitar el timeout.
+            // Esto mantiene el chat principal limpio.
+            await interaction.reply({ content: '⚙️ Creando la party, por favor espera...', ephemeral: true });
+
             const compoId = interaction.customId.split('_')[3];
 
             if (!db) {
@@ -391,39 +393,45 @@ client.on(Events.InteractionCreate, async interaction => {
                 return;
             }
 
-            const compoSnapshot = await getDocs(composCollectionRef);
-            const selectedCompo = compoSnapshot.docs.find(doc => doc.id === compoId);
-            const compoContent = selectedCompo.data().content;
+            try {
+                const compoSnapshot = await getDocs(composCollectionRef);
+                const selectedCompo = compoSnapshot.docs.find(doc => doc.id === compoId);
+                if (!selectedCompo) {
+                    await interaction.editReply('Error: El template de party no fue encontrado.');
+                    return;
+                }
+                const compoContent = selectedCompo.data().content;
 
-            const horaMasseo = interaction.fields.getTextInputValue('hora_masseo');
-            const tiempoFinalizacionStr = interaction.fields.getTextInputValue('tiempo_finalizacion');
-            const mensajeEncabezado = interaction.fields.getTextInputValue('mensaje_encabezado');
+                const horaMasseo = interaction.fields.getTextInputValue('hora_masseo');
+                const tiempoFinalizacionStr = interaction.fields.getTextInputValue('tiempo_finalizacion');
+                const mensajeEncabezado = interaction.fields.getTextInputValue('mensaje_encabezado');
 
-            let totalMilisegundos = 0;
-            const regexHoras = /(\d+)\s*h/;
-            const regexMinutos = /(\d+)\s*m/;
+                let totalMilisegundos = 0;
+                const regexHoras = /(\d+)\s*h/;
+                const regexMinutos = /(\d+)\s*m/;
 
-            const matchHoras = tiempoFinalizacionStr.match(regexHoras);
-            const matchMinutos = tiempoFinalizacionStr.match(regexMinutos);
+                const matchHoras = tiempoFinalizacionStr.match(regexHoras);
+                const matchMinutos = tiempoFinalizacionStr.match(regexMinutos);
 
-            if (matchHoras) {
-                totalMilisegundos += parseInt(matchHoras[1]) * 60 * 60 * 1000;
-            }
-            if (matchMinutos) {
-                totalMilisegundos += parseInt(matchMinutos[1]) * 60 * 1000;
-            }
+                if (matchHoras) {
+                    totalMilisegundos += parseInt(matchHoras[1]) * 60 * 60 * 1000;
+                }
+                if (matchMinutos) {
+                    totalMilisegundos += parseInt(matchMinutos[1]) * 60 * 1000;
+                }
 
-            const fechaFinalizacion = Math.floor((Date.now() + totalMilisegundos) / 1000);
+                const fechaFinalizacion = Math.floor((Date.now() + totalMilisegundos) / 1000);
 
-            const mensajeCompleto = `${horaMasseo}
+                const mensajeCompleto = `${horaMasseo}
 ${mensajeEncabezado || ''}
 
 **INSCRIPCIONES TERMINAN:** <t:${fechaFinalizacion}:R>
 
 ${compoContent}`;
 
-            try {
+                // Envía el mensaje de la party al canal principal
                 const mensajeInicial = await interaction.channel.send({ content: mensajeCompleto });
+                
                 const hilo = await mensajeInicial.startThread({
                     name: "Inscripción de la party",
                     autoArchiveDuration: 60,
@@ -454,10 +462,12 @@ ${compoContent}`;
                     }, totalMilisegundos);
                 }
 
-                await interaction.editReply(`✅ Party iniciada. El hilo de inscripción se ha creado en <#${hilo.id}>.`);
+                // Edita el mensaje de "pensando" para indicar que la party se creó, de forma privada
+                await interaction.editReply({ content: `✅ La party se ha iniciado correctamente. Puedes verla en <#${hilo.id}>.`, ephemeral: true });
+
             } catch (error) {
                 console.error('Error al crear la party o el hilo:', error);
-                await interaction.editReply({ content: 'Hubo un error al intentar crear la party. Por favor, asegúrate de que el bot tenga los permisos necesarios.', flags: [MessageFlags.Ephemeral] });
+                await interaction.editReply({ content: 'Hubo un error al intentar crear la party. Por favor, asegúrate de que el bot tenga los permisos necesarios.', ephemeral: true });
             }
         }
     }
