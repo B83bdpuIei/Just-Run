@@ -180,7 +180,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.editReply('Este comando solo se puede usar dentro de un hilo de party.');
                 return;
             }
-
+            
             const hilo = interaction.channel;
             if (!hilosMonitoreados[hilo.id]) {
                 await interaction.editReply('Este hilo no está monitoreado. Por favor, usa este comando en un hilo de party creado por el bot.');
@@ -228,6 +228,7 @@ client.on(Events.InteractionCreate, async interaction => {
             await interaction.editReply(`✅ Usuario <@${usuarioARemover.id}> eliminado del puesto **${numeroPuesto}**.`);
             
         } else if (commandName === 'add_user_compo') {
+            // CORRECCIÓN: DeferReply para responder a tiempo
             await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
             if (!interaction.channel.isThread()) {
@@ -236,11 +237,13 @@ client.on(Events.InteractionCreate, async interaction => {
             }
             
             const hilo = interaction.channel;
-            if (!hilosMonitoreados[hilo.id]) {
-                await interaction.editReply('Este hilo no está monitoreado. Por favor, usa este comando en un hilo de party creado por el bot.');
+
+            // CORRECCIÓN: Añadimos una comprobación más robusta.
+            if (!hilo.guild || !hilosMonitoreados[hilo.id]) {
+                await interaction.editReply('Este hilo no está siendo monitoreado por el bot. Por favor, usa este comando en un hilo de party creado recientemente.');
                 return;
             }
-            
+
             const usuarioAAgregar = interaction.options.getUser('usuario');
             const puestoAAgregar = interaction.options.getInteger('puesto');
             const mensajePrincipal = await hilo.fetchStarterMessage();
