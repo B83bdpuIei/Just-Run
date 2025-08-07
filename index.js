@@ -3,7 +3,7 @@ const {
     Client, GatewayIntentBits, Partials, Events,
     ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder,
     SlashCommandBuilder, PermissionFlagsBits, MessageFlags, StringSelectMenuBuilder,
-    StringSelectMenuInteraction, InteractionType
+    StringSelectMenuInteraction, InteractionType, ButtonBuilder, ButtonStyle
 } = require('discord.js');
 const { initializeApp } = require('firebase/app');
 const { getFirestore, collection, addDoc, getDocs, doc, setDoc } = require('firebase/firestore');
@@ -19,9 +19,8 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMessageReactions,
     ],
-    partials: [Partials.Channel, Partials.Message, Partials.Reaction]
+    partials: [Partials.Channel, Partials.Message]
 });
 
 // --- Servidor Web para mantener el Bot Activo (Render) ---
@@ -462,7 +461,15 @@ ${mensajeEncabezado || ''}
 
 ${compoContent}`;
 
-                const mensajeInicial = await interaction.channel.send({ content: mensajeCompleto });
+                // Creamos el botón "Desapuntarme"
+                const desapuntarmeButton = new ButtonBuilder()
+                    .setCustomId('desapuntarme_button')
+                    .setLabel('❌ Desapuntarme')
+                    .setStyle(ButtonStyle.Danger);
+
+                const row = new ActionRowBuilder().addComponents(desapuntarmeButton);
+
+                const mensajeInicial = await interaction.channel.send({ content: mensajeCompleto, components: [row] });
                 
                 const hilo = await mensajeInicial.startThread({
                     name: "Inscripción de la party",
@@ -471,8 +478,160 @@ ${compoContent}`;
                 
                 await hilo.send("¡Escribe un número para apuntarte!");
 
-                // Agregamos la reacción ❌ al mensaje principal para que los usuarios puedan desapuntarse
-                await mensajeInicial.react('❌');
+                if (totalMilisegundos > 0) {
+                    await hilo.send(`El hilo se bloqueará automáticamente en **${tiempoFinalizacionStr}**.`);
+                    
+                    setTimeout(async () => {
+                        try {
+                            const canalHilo = await client.channels.fetch(hilo.id);
+                            if (canalHilo && !canalHilo.archived) {
+                                await canalHilo.setLocked(true);
+                                await canalHilo.send('¡Las inscripciones han terminado! Este hilo ha sido bloqueado y ya no se pueden añadir más participantes.');
+                            }
+                        } catch (error) {
+                            console.error(`Error al bloquear el hilo ${hilo.id}:`, error);
+                        }
+                    }, totalMilisegundos);
+                }
+
+                await interaction.editReply({ content: `✅ La party se ha iniciado correctamente. Puedes verla en <#${hilo.id}>.`, flags: [MessageFlags.Ephemeral] });
+
+            } catch (error) {
+                console.error('Error al crear la party o el hilo:', error);
+                await interaction.editReply({ content: 'Hubo un error al intentar crear la party. Por favor, asegúrate de que el bot tenga los permisos necesarios.', flags: [MessageFlags.Ephemeral] });
+            }
+        }
+    } else if (interaction.isButton()) {
+        if (interaction.customId === 'desapuntarme_button') {
+            await interaction.deferReply({ ephemeral: true });
+
+            const message = interaction.message;
+            const user = interaction.user;
+
+            if (!message.channel.isThread()) {
+                await interaction.editReply('Este botón solo funciona en un hilo de party.');
+                return;
+            }
+
+            const mensajePrincipal = await message.channel.fetchStarterMessage();
+            if (!mensajePrincipal || message.id !== mensajePrincipal.id) {
+                await interaction.editReply('Este no es el mensaje principal de la party.');
+                return;
+            }
+
+            try {
+                let lineas = mensajePrincipal.content.split('\n');
+                let oldSpotIndex = -1;
+
+                for (const [index, linea] of lineas.entries()) {
+                    if (linea.includes(`<@${user.id}>`)) {
+                        oldSpotIndex = index;
+                        break;
+                    }
+                }
+                
+                if (oldSpotIndex === -1) {
+                    await interaction.editReply('No estás apuntado en esta party.');
+                    return;
+                }
+
+                const oldLine = lineas[oldSpotIndex];
+                const oldSpot = parseInt(oldLine.trim().split('.')[0]);
+                const regexRol = new RegExp(`^${oldSpot}\\.(.*?)(<@${user.id}>)`);
+                const match = oldLine.match(regexRol);
+
+                if (match && match[1].trim() !== '') {
+                    lineas[oldSpotIndex] = `${oldSpot}.${match[1].trim()}`;
+                } else {
+                    const regexClean = new RegExp(`(<@${user.id}>)`);
+                    lineas[oldSpotIndex] = oldLine.replace(regexClean, '').trim();
+                }
+
+                await mensajePrincipal.edit(lineas.join('\n'));
+                
+                await interaction.editReply(`✅ Te has desapuntado del puesto **${oldSpot}**.`);
+            } catch (error) {
+                console.error('Error procesando el botón de desapuntar:', error);
+                await interaction.editReply('Hubo un error al intentar desapuntarte. Por favor, inténtalo de nuevo.');
+            }
+        }
+    } else if (interaction.type === InteractionType.ModalSubmit) {
+        if (interaction.customId === 'add_compo_modal') {
+            const compoName = interaction.fields.getTextInputValue('compo_name');
+            const compoContent = interaction.fields.getTextInputValue('compo_content');
+            
+            if (!db) {
+                await interaction.reply({ content: 'Error: La base de datos no está disponible.', flags: [MessageFlags.Ephemeral] });
+                return;
+            }
+
+            try {
+                await addDoc(composCollectionRef, {
+                    name: compoName,
+                    content: compoContent
+                });
+                await interaction.reply({ content: `✅ El template de party **${compoName}** ha sido guardado.`, flags: [MessageFlags.Ephemeral] });
+            } catch (error) {
+                console.error('Error al guardar el template de party:', error);
+                await interaction.reply({ content: 'Hubo un error al guardar el template.', flags: [MessageFlags.Ephemeral] });
+            }
+            return;
+        }
+
+        if (interaction.customId.startsWith('start_comp_modal_')) {
+            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
+            const compoId = interaction.customId.split('_')[3];
+
+            if (!db) {
+                await interaction.editReply('Error: La base de datos no está disponible.');
+                return;
+            }
+
+            try {
+                const composSnapshot = await getDocs(composCollectionRef);
+                const selectedCompo = composSnapshot.docs.find(doc => doc.id === compoId);
+                if (!selectedCompo) {
+                    await interaction.editReply('Error: El template de party no fue encontrado.');
+                    return;
+                }
+                const compoContent = selectedCompo.data().content;
+
+                const horaMasseo = interaction.fields.getTextInputValue('hora_masseo');
+                const tiempoFinalizacionStr = interaction.fields.getTextInputValue('tiempo_finalizacion');
+                const mensajeEncabezado = interaction.fields.getTextInputValue('mensaje_encabezado');
+
+                let totalMilisegundos = 0;
+                const regexHoras = /(\d+)\s*h/;
+                const regexMinutos = /(\d+)\s*m/;
+
+                const matchHoras = tiempoFinalizacionStr.match(regexHoras);
+                const matchMinutos = tiempoFinalizacionStr.match(regexMinutos);
+
+                if (matchHoras) {
+                    totalMilisegundos += parseInt(matchHoras[1]) * 60 * 60 * 1000;
+                }
+                if (matchMinutos) {
+                    totalMilisegundos += parseInt(matchMinutos[1]) * 60 * 1000;
+                }
+
+                const fechaFinalizacion = Math.floor((Date.now() + totalMilisegundos) / 1000);
+
+                const mensajeCompleto = `${horaMasseo}
+${mensajeEncabezado || ''}
+
+**INSCRIPCIONES TERMINAN:** <t:${fechaFinalizacion}:R>
+
+${compoContent}`;
+
+                const mensajeInicial = await interaction.channel.send({ content: mensajeCompleto });
+                
+                const hilo = await mensajeInicial.startThread({
+                    name: "Inscripción de la party",
+                    autoArchiveDuration: 60,
+                });
+                
+                await hilo.send("¡Escribe un número para apuntarte!");
 
                 if (totalMilisegundos > 0) {
                     await hilo.send(`El hilo se bloqueará automáticamente en **${tiempoFinalizacionStr}**.`);
@@ -499,98 +658,6 @@ ${compoContent}`;
         }
     }
 });
-
-// Evento: Reacciones en el canal para desapuntarse
-client.on(Events.MessageReactionAdd, async (reaction, user) => {
-    // Si la reacción es del bot, la ignoramos.
-    if (user.bot) return;
-
-    // Asegurarse de que la reacción y el usuario no sean parciales
-    if (reaction.partial) {
-        try {
-            await reaction.fetch();
-        } catch (error) {
-            console.error('Error al obtener la reacción:', error);
-            return;
-        }
-    }
-    if (user.partial) {
-        try {
-            await user.fetch();
-        } catch (error) {
-            console.error('Error al obtener el usuario de la reacción:', error);
-            return;
-        }
-    }
-
-    const message = reaction.message;
-
-    // Verificamos si la reacción está en el mensaje principal de un hilo de party.
-    if (!message.channel.isThread()) {
-        await reaction.users.remove(user.id).catch(() => {});
-        return;
-    }
-
-    const mensajePrincipal = await message.channel.fetchStarterMessage();
-    if (!mensajePrincipal || message.id !== mensajePrincipal.id) {
-        await reaction.users.remove(user.id).catch(() => {});
-        return;
-    }
-
-    // Si la reacción no es la de desapuntar (❌), la eliminamos y no hacemos nada más.
-    if (reaction.emoji.name !== '❌') {
-        await reaction.users.remove(user.id).catch(() => {});
-        return;
-    }
-
-    // A partir de aquí, se ejecuta la lógica de desapuntar solo si es la reacción ❌
-    try {
-        let lineas = mensajePrincipal.content.split('\n');
-
-        let oldSpotIndex = -1;
-        for (const [index, linea] of lineas.entries()) {
-            if (linea.includes(`<@${user.id}>`)) {
-                oldSpotIndex = index;
-                break;
-            }
-        }
-        
-        if (oldSpotIndex === -1) {
-            // El usuario que reacciona no está en la lista. Se elimina su reacción y no se hace nada más.
-            await reaction.users.remove(user.id).catch(() => {});
-            return;
-        }
-
-        const oldLine = lineas[oldSpotIndex];
-        const oldSpot = parseInt(oldLine.trim().split('.')[0]);
-
-        // Regex para capturar el rol (texto entre el número y la mención del usuario)
-        const regexRol = new RegExp(`^${oldSpot}\\.(.*?)(<@${user.id}>)`);
-        const match = oldLine.match(regexRol);
-
-        if (match && match[1].trim() !== '') {
-            // Si hay un rol definido, lo restauramos sin el usuario
-            lineas[oldSpotIndex] = `${oldSpot}.${match[1].trim()}`;
-        } else {
-            // Si el rol no estaba definido o era "X", lo dejamos sin usuario
-            // Esto también maneja el caso de que la línea no tenía un rol explícito
-            const regexClean = new RegExp(`(<@${user.id}>)`);
-            lineas[oldSpotIndex] = oldLine.replace(regexClean, '').trim();
-        }
-
-        await mensajePrincipal.edit(lineas.join('\n'));
-        await reaction.users.remove(user.id).catch(() => {}); // Quita la reacción del usuario
-        
-        const mensajeConfirmacion = await message.channel.send(`✅ <@${user.id}> se ha desapuntado del puesto **${oldSpot}**.`);
-        setTimeout(() => mensajeConfirmacion.delete().catch(() => {}), 10000);
-
-    } catch (error) {
-        console.error('Error procesando reacción:', error);
-        // Intentar eliminar la reacción incluso si hubo un error para no dejar el canal sucio.
-        await reaction.users.remove(user.id).catch(() => {});
-    }
-});
-
 
 // Evento: Mensajes en el canal para las inscripciones
 client.on(Events.MessageCreate, async message => {
