@@ -182,7 +182,8 @@ client.on(Events.InteractionCreate, async interaction => {
             }
             
             const hilo = interaction.channel;
-            if (!hilosMonitoreados[hilo.id]) {
+            const hiloInfo = hilosMonitoreados[hilo.id];
+            if (!hiloInfo) {
                 await interaction.editReply('Este hilo no está monitoreado. Por favor, usa este comando en un hilo de party creado por el bot.');
                 return;
             }
@@ -195,38 +196,25 @@ client.on(Events.InteractionCreate, async interaction => {
                 return;
             }
 
-            const regexUsuario = new RegExp(`<@${usuarioARemover.id}>`);
-            let lineas = mensajePrincipal.content.split('\n');
-            let lineaEncontrada = -1;
+            const participante = hiloInfo.participantes.get(usuarioARemover.id);
 
-            for (let i = 0; i < lineas.length; i++) {
-                if (regexUsuario.test(lineas[i])) {
-                    lineaEncontrada = i;
-                    break;
-                }
-            }
-
-            if (lineaEncontrada === -1) {
+            if (!participante) {
                 await interaction.editReply(`El usuario <@${usuarioARemover.id}> no se encuentra en la lista de la party.`);
                 return;
             }
-
-            const numeroPuesto = parseInt(lineas[lineaEncontrada].trim().split('.')[0]);
             
-            // CORRECCIÓN: Ahora se comprueba si el puesto original era un "X" para determinar cómo borrarlo
-            if (lineas[lineaEncontrada].includes('. X')) {
-                lineas[lineaEncontrada] = `${numeroPuesto}. X`;
-            } else {
-                lineas[lineaEncontrada] = lineas[lineaEncontrada].split(`<@${usuarioARemover.id}>`)[0].trim();
+            let lineas = mensajePrincipal.content.split('\n');
+            const lineaIndex = lineas.findIndex(linea => linea.startsWith(`${participante.spot}.`));
+            
+            if (lineaIndex !== -1) {
+                 // CORRECCIÓN: Restaura el puesto a su estado original guardado
+                lineas[lineaIndex] = participante.originalContent;
+                hiloInfo.participantes.delete(usuarioARemover.id);
             }
 
             await mensajePrincipal.edit(lineas.join('\n'));
 
-            if (hilosMonitoreados[hilo.id]) {
-                hilosMonitoreados[hilo.id].participantes.delete(usuarioARemover.id);
-            }
-
-            await interaction.editReply(`✅ Usuario <@${usuarioARemover.id}> eliminado del puesto **${numeroPuesto}**.`);
+            await interaction.editReply(`✅ Usuario <@${usuarioARemover.id}> eliminado del puesto **${participante.spot}**.`);
             
         } else if (commandName === 'add_user_compo') {
             await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
@@ -237,7 +225,8 @@ client.on(Events.InteractionCreate, async interaction => {
             }
             
             const hilo = interaction.channel;
-            if (!hilo.guild || !hilosMonitoreados[hilo.id]) {
+            const hiloInfo = hilosMonitoreados[hilo.id];
+            if (!hiloInfo) {
                 await interaction.editReply('Este hilo no está siendo monitoreado por el bot. Por favor, usa este comando en un hilo de party creado recientemente.');
                 return;
             }
@@ -252,18 +241,14 @@ client.on(Events.InteractionCreate, async interaction => {
             }
             
             let lineas = mensajePrincipal.content.split('\n');
-            const regexUsuario = new RegExp(`<@${usuarioAAgregar.id}>`);
-            const lineaAnteriorIndex = lineas.findIndex(linea => regexUsuario.test(linea));
+            const participanteAnterior = hiloInfo.participantes.get(usuarioAAgregar.id);
             
-            if (lineaAnteriorIndex !== -1) {
-                const numeroPuestoAnterior = parseInt(lineas[lineaAnteriorIndex].trim().split('.')[0]);
-                if (lineas[lineaAnteriorIndex].includes('. X')) {
-                    lineas[lineaAnteriorIndex] = `${numeroPuestoAnterior}. X`;
-                } else {
-                    lineas[lineaAnteriorIndex] = lineas[lineaAnteriorIndex].split(`<@${usuarioAAgregar.id}>`)[0].trim();
-                }
-                if (hilosMonitoreados[hilo.id]) {
-                    hilosMonitoreados[hilo.id].participantes.delete(usuarioAAgregar.id);
+            if (participanteAnterior) {
+                const lineaAnteriorIndex = lineas.findIndex(linea => linea.startsWith(`${participanteAnterior.spot}.`));
+                if (lineaAnteriorIndex !== -1) {
+                    // CORRECCIÓN: Restaura el puesto a su estado original guardado
+                    lineas[lineaAnteriorIndex] = participanteAnterior.originalContent;
+                    hiloInfo.participantes.delete(usuarioAAgregar.id);
                 }
             }
 
@@ -273,14 +258,15 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.editReply(`El puesto **${puestoAAgregar}** no es válido.`);
                 return;
             }
-            
+
             if (lineas[lineaNuevaIndex].includes('<@')) {
                 await interaction.editReply(`El puesto **${puestoAAgregar}** ya está ocupado.`);
                 return;
             }
+            
+            const lineaOriginal = lineas[lineaNuevaIndex];
 
-            // CORRECCIÓN: Ahora se pregunta el rol si la línea contiene ". X"
-            if (lineas[lineaNuevaIndex].includes('. X')) {
+            if (lineaOriginal.includes('. X')) {
                 const preguntaRol = await hilo.send(`<@${interaction.user.id}>, has apuntado a <@${usuarioAAgregar.id}> en el puesto **${puestoAAgregar}**. ¿Qué rol va a ir?`);
                 
                 const filtro = m => m.author.id === interaction.user.id;
@@ -296,9 +282,8 @@ client.on(Events.InteractionCreate, async interaction => {
                     await mensajePrincipal.edit(lineas.join('\n'));
                     await interaction.editReply(`✅ Usuario <@${usuarioAAgregar.id}> añadido al puesto **${puestoAAgregar}** como **${rol}**.`);
                     
-                    if (hilosMonitoreados[hilo.id]) {
-                        hilosMonitoreados[hilo.id].participantes.set(usuarioAAgregar.id, puestoAAgregar);
-                    }
+                    // CORRECCIÓN: Se guarda el estado original para futura referencia
+                    hiloInfo.participantes.set(usuarioAAgregar.id, { spot: puestoAAgregar, originalContent: lineaOriginal });
                     colector.stop();
                 });
 
@@ -308,14 +293,12 @@ client.on(Events.InteractionCreate, async interaction => {
                     }
                 });
             } else {
-                const lineaOriginal = lineas[lineaNuevaIndex];
                 const nuevoValor = `${lineaOriginal} <@${usuarioAAgregar.id}>`;
                 lineas[lineaNuevaIndex] = nuevoValor;
                 await mensajePrincipal.edit(lineas.join('\n'));
 
-                if (hilosMonitoreados[hilo.id]) {
-                    hilosMonitoreados[hilo.id].participantes.set(usuarioAAgregar.id, puestoAAgregar);
-                }
+                // CORRECCIÓN: Se guarda el estado original para futura referencia
+                hiloInfo.participantes.set(usuarioAAgregar.id, { spot: puestoAAgregar, originalContent: lineaOriginal });
                 
                 await interaction.editReply(`✅ Usuario <@${usuarioAAgregar.id}> añadido al puesto **${puestoAAgregar}**.`);
             }
@@ -508,14 +491,10 @@ client.on(Events.MessageCreate, async message => {
     
         // Si el usuario ya está apuntado, lo eliminamos de su puesto anterior
         if (oldSpot) {
-            const lineaAnterior = lineas.findIndex(linea => linea.startsWith(`${oldSpot}.`));
+            const lineaAnterior = lineas.findIndex(linea => linea.startsWith(`${oldSpot.spot}.`));
             if (lineaAnterior !== -1) {
-                // CORRECCIÓN: Ahora se comprueba si la línea original era un "X" para saber cómo limpiarla
-                if (lineas[lineaAnterior].includes('. X')) {
-                    lineas[lineaAnterior] = `${oldSpot}. X`;
-                } else {
-                    lineas[lineaAnterior] = lineas[lineaAnterior].split(`<@${author.id}>`)[0].trim();
-                }
+                // CORRECCIÓN: Restaura el puesto a su estado original guardado
+                lineas[lineaAnterior] = oldSpot.originalContent;
                 hiloInfo.participantes.delete(author.id);
             }
         }
@@ -543,7 +522,8 @@ client.on(Events.MessageCreate, async message => {
                     const nuevoValor = `${numero}. ${rol} <@${author.id}>`;
                     lineas[indiceLinea] = nuevoValor;
                     await mensajeAEditar.edit(lineas.join('\n'));
-                    hiloInfo.participantes.set(author.id, numero);
+                    // CORRECCIÓN: Se guarda el estado original para futura referencia
+                    hiloInfo.participantes.set(author.id, { spot: numero, originalContent: lineas[indiceLinea] });
                     await channel.send(`<@${author.id}>, te has apuntado en el puesto **${numero}** como **${rol}**.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
                 });
     
@@ -557,7 +537,8 @@ client.on(Events.MessageCreate, async message => {
                 const nuevoValor = `${lineaOriginal} <@${author.id}>`;
                 lineas[indiceLinea] = nuevoValor;
                 await mensajeAEditar.edit(lineas.join('\n'));
-                hiloInfo.participantes.set(author.id, numero);
+                // CORRECCIÓN: Se guarda el estado original para futura referencia
+                hiloInfo.participantes.set(author.id, { spot: numero, originalContent: lineaOriginal });
                 await channel.send(`<@${author.id}>, te has apuntado en el puesto **${numero}** con éxito.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
             }
         }
