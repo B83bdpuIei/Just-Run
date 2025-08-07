@@ -181,8 +181,13 @@ client.on(Events.InteractionCreate, async interaction => {
                 return;
             }
 
-            const usuarioARemover = interaction.options.getUser('usuario');
             const hilo = interaction.channel;
+            if (!hilosMonitoreados[hilo.id]) {
+                await interaction.editReply('Este hilo no está monitoreado. Por favor, usa este comando en un hilo de party creado por el bot.');
+                return;
+            }
+
+            const usuarioARemover = interaction.options.getUser('usuario');
             const mensajePrincipal = await hilo.fetchStarterMessage();
 
             if (!mensajePrincipal) {
@@ -230,9 +235,14 @@ client.on(Events.InteractionCreate, async interaction => {
                 return;
             }
             
+            const hilo = interaction.channel;
+            if (!hilosMonitoreados[hilo.id]) {
+                await interaction.editReply('Este hilo no está monitoreado. Por favor, usa este comando en un hilo de party creado por el bot.');
+                return;
+            }
+            
             const usuarioAAgregar = interaction.options.getUser('usuario');
             const puestoAAgregar = interaction.options.getInteger('puesto');
-            const hilo = interaction.channel;
             const mensajePrincipal = await hilo.fetchStarterMessage();
 
             if (!mensajePrincipal) {
@@ -310,8 +320,10 @@ client.on(Events.InteractionCreate, async interaction => {
         }
     } else if (interaction.isStringSelectMenu()) {
         if (interaction.customId === 'select_compo') {
+            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
             if (!db) {
-                await interaction.reply({ content: 'Error: La base de datos no está disponible. Por favor, inténtalo de nuevo más tarde.', flags: [MessageFlags.Ephemeral] });
+                await interaction.editReply({ content: 'Error: La base de datos no está disponible. Por favor, inténtalo de nuevo más tarde.', flags: [MessageFlags.Ephemeral] });
                 return;
             }
 
@@ -355,7 +367,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.showModal(modal);
             } catch (error) {
                 console.error('Error al obtener las compos:', error);
-                await interaction.reply({ content: 'Hubo un error al cargar los templates de party.', flags: [MessageFlags.Ephemeral] });
+                await interaction.editReply({ content: 'Hubo un error al cargar los templates de party.', flags: [MessageFlags.Ephemeral] });
             }
         }
     } else if (interaction.type === InteractionType.ModalSubmit) {
@@ -382,9 +394,7 @@ client.on(Events.InteractionCreate, async interaction => {
         }
 
         if (interaction.customId.startsWith('start_comp_modal_')) {
-            // CORRECCIÓN: Responde inmediatamente con un mensaje temporal y privado para evitar el timeout.
-            // Esto mantiene el chat principal limpio.
-            await interaction.reply({ content: '⚙️ Creando la party, por favor espera...', ephemeral: true });
+            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
             const compoId = interaction.customId.split('_')[3];
 
@@ -463,11 +473,11 @@ ${compoContent}`;
                 }
 
                 // Edita el mensaje de "pensando" para indicar que la party se creó, de forma privada
-                await interaction.editReply({ content: `✅ La party se ha iniciado correctamente. Puedes verla en <#${hilo.id}>.`, ephemeral: true });
+                await interaction.editReply({ content: `✅ La party se ha iniciado correctamente. Puedes verla en <#${hilo.id}>.`, flags: [MessageFlags.Ephemeral] });
 
             } catch (error) {
                 console.error('Error al crear la party o el hilo:', error);
-                await interaction.editReply({ content: 'Hubo un error al intentar crear la party. Por favor, asegúrate de que el bot tenga los permisos necesarios.', ephemeral: true });
+                await interaction.editReply({ content: 'Hubo un error al intentar crear la party. Por favor, asegúrate de que el bot tenga los permisos necesarios.', flags: [MessageFlags.Ephemeral] });
             }
         }
     }
