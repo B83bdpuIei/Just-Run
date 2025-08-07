@@ -503,16 +503,22 @@ ${compoContent}`;
 // Evento: Reacciones en el canal para desapuntarse
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
     // Si la reacción es del bot, la ignoramos.
-    if (user.bot) {
-        return;
-    }
-    
-    // Obtiene el mensaje completo, si no está en caché
+    if (user.bot) return;
+
+    // Asegurarse de que la reacción y el usuario no sean parciales
     if (reaction.partial) {
         try {
             await reaction.fetch();
         } catch (error) {
-            console.error('Error al obtener el mensaje de la reacción:', error);
+            console.error('Error al obtener la reacción:', error);
+            return;
+        }
+    }
+    if (user.partial) {
+        try {
+            await user.fetch();
+        } catch (error) {
+            console.error('Error al obtener el usuario de la reacción:', error);
             return;
         }
     }
