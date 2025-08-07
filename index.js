@@ -213,7 +213,8 @@ client.on(Events.InteractionCreate, async interaction => {
 
             const numeroPuesto = parseInt(lineas[lineaEncontrada].trim().split('.')[0]);
             
-            if (numeroPuesto >= 35) {
+            // CORRECCIÓN: Ahora se comprueba si el puesto original era un "X" para determinar cómo borrarlo
+            if (lineas[lineaEncontrada].includes('. X')) {
                 lineas[lineaEncontrada] = `${numeroPuesto}. X`;
             } else {
                 lineas[lineaEncontrada] = lineas[lineaEncontrada].split(`<@${usuarioARemover.id}>`)[0].trim();
@@ -228,7 +229,6 @@ client.on(Events.InteractionCreate, async interaction => {
             await interaction.editReply(`✅ Usuario <@${usuarioARemover.id}> eliminado del puesto **${numeroPuesto}**.`);
             
         } else if (commandName === 'add_user_compo') {
-            // CORRECCIÓN: DeferReply para responder a tiempo
             await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
             if (!interaction.channel.isThread()) {
@@ -257,7 +257,7 @@ client.on(Events.InteractionCreate, async interaction => {
             
             if (lineaAnteriorIndex !== -1) {
                 const numeroPuestoAnterior = parseInt(lineas[lineaAnteriorIndex].trim().split('.')[0]);
-                if (numeroPuestoAnterior >= 35) {
+                if (lineas[lineaAnteriorIndex].includes('. X')) {
                     lineas[lineaAnteriorIndex] = `${numeroPuestoAnterior}. X`;
                 } else {
                     lineas[lineaAnteriorIndex] = lineas[lineaAnteriorIndex].split(`<@${usuarioAAgregar.id}>`)[0].trim();
@@ -279,7 +279,8 @@ client.on(Events.InteractionCreate, async interaction => {
                 return;
             }
 
-            if (puestoAAgregar >= 35) {
+            // CORRECCIÓN: Ahora se pregunta el rol si la línea contiene ". X"
+            if (lineas[lineaNuevaIndex].includes('. X')) {
                 const preguntaRol = await hilo.send(`<@${interaction.user.id}>, has apuntado a <@${usuarioAAgregar.id}> en el puesto **${puestoAAgregar}**. ¿Qué rol va a ir?`);
                 
                 const filtro = m => m.author.id === interaction.user.id;
@@ -321,8 +322,6 @@ client.on(Events.InteractionCreate, async interaction => {
         }
     } else if (interaction.isStringSelectMenu()) {
         if (interaction.customId === 'select_compo') {
-            // CORRECCIÓN: Quitamos el deferReply para evitar que la interacción se responda dos veces
-            // y causar el error InteractionAlreadyReplied.
             if (!db) {
                 await interaction.reply({ content: 'Error: La base de datos no está disponible. Por favor, inténtalo de nuevo más tarde.', flags: [MessageFlags.Ephemeral] });
                 return;
@@ -511,7 +510,8 @@ client.on(Events.MessageCreate, async message => {
         if (oldSpot) {
             const lineaAnterior = lineas.findIndex(linea => linea.startsWith(`${oldSpot}.`));
             if (lineaAnterior !== -1) {
-                if (oldSpot >= 35) {
+                // CORRECCIÓN: Ahora se comprueba si la línea original era un "X" para saber cómo limpiarla
+                if (lineas[lineaAnterior].includes('. X')) {
                     lineas[lineaAnterior] = `${oldSpot}. X`;
                 } else {
                     lineas[lineaAnterior] = lineas[lineaAnterior].split(`<@${author.id}>`)[0].trim();
@@ -528,15 +528,9 @@ client.on(Events.MessageCreate, async message => {
                 setTimeout(() => mensajeOcupado.delete().catch(() => {}), 10000);
                 return;
             }
-    
-            if (numero <= 34) {
-                const lineaOriginal = lineas[indiceLinea];
-                const nuevoValor = `${lineaOriginal} <@${author.id}>`;
-                lineas[indiceLinea] = nuevoValor;
-                await mensajeAEditar.edit(lineas.join('\n'));
-                hiloInfo.participantes.set(author.id, numero);
-                await channel.send(`<@${author.id}>, te has apuntado en el puesto **${numero}** con éxito.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
-            } else {
+
+            // CORRECCIÓN: Nueva lógica para preguntar por el rol si la línea contiene ". X"
+            if (lineas[indiceLinea].includes('. X')) {
                 const preguntaRol = await channel.send(`<@${author.id}>, te has apuntado en el puesto **${numero}**. ¿Qué rol vas a ir?`);
                 
                 const filtro = m => m.author.id === author.id;
@@ -558,6 +552,13 @@ client.on(Events.MessageCreate, async message => {
                         channel.send(`<@${author.id}>, no respondiste a tiempo. Por favor, vuelve a intentarlo.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
                     }
                 });
+            } else {
+                const lineaOriginal = lineas[indiceLinea];
+                const nuevoValor = `${lineaOriginal} <@${author.id}>`;
+                lineas[indiceLinea] = nuevoValor;
+                await mensajeAEditar.edit(lineas.join('\n'));
+                hiloInfo.participantes.set(author.id, numero);
+                await channel.send(`<@${author.id}>, te has apuntado en el puesto **${numero}** con éxito.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
             }
         }
     } catch (error) {
