@@ -333,8 +333,10 @@ client.on(Events.InteractionCreate, async interaction => {
         }
     } else if (interaction.isStringSelectMenu()) {
         if (interaction.customId === 'select_compo') {
+            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
             if (!db) {
-                await interaction.reply({ content: 'Error: La base de datos no está disponible. Por favor, inténtalo de nuevo más tarde.', flags: [MessageFlags.Ephemeral] });
+                await interaction.editReply('Error: La base de datos no está disponible. Por favor, inténtalo de nuevo más tarde.');
                 return;
             }
 
@@ -343,14 +345,14 @@ client.on(Events.InteractionCreate, async interaction => {
                 if (interaction.values && interaction.values.length > 0) {
                     compoId = interaction.values[0];
                 } else {
-                    await interaction.reply({ content: 'Hubo un error al seleccionar el template. Por favor, inténtalo de nuevo.', flags: [MessageFlags.Ephemeral] });
+                    await interaction.editReply('Hubo un error al seleccionar el template. Por favor, inténtalo de nuevo.');
                     return;
                 }
 
                 const composSnapshot = await getDocs(composCollectionRef);
                 const selectedCompo = composSnapshot.docs.find(doc => doc.id === compoId);
                 if (!selectedCompo) {
-                        await interaction.reply({ content: 'Error: El template de party no fue encontrado.', flags: [MessageFlags.Ephemeral] });
+                        await interaction.editReply('Error: El template de party no fue encontrado.');
                         return;
                 }
                 const compoName = selectedCompo.data().name;
@@ -389,7 +391,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.showModal(modal);
             } catch (error) {
                 console.error('Error al obtener las compos:', error);
-                await interaction.reply({ content: 'Hubo un error al cargar los templates de party.', flags: [MessageFlags.Ephemeral] });
+                await interaction.editReply('Hubo un error al cargar los templates de party.');
             }
         }
     } else if (interaction.type === InteractionType.ModalSubmit) {
@@ -509,10 +511,6 @@ ${compoContent}`;
 
             const message = interaction.message;
             const user = interaction.user;
-
-            // En esta lógica, el botón se encuentra en el mensaje principal, que no es un hilo
-            // Por lo tanto, no es necesario comprobar si message.channel.isThread()
-            // Y la lógica de fetchStarterMessage no aplica
             
             try {
                 let lineas = message.content.split('\n');
@@ -589,10 +587,10 @@ client.on(Events.MessageCreate, async message => {
     }
 
     try {
-        await message.delete();
-
         const mensajePrincipal = await channel.fetchStarterMessage();
         if (!mensajePrincipal) {
+            await message.delete().catch(() => {});
+            await channel.send('Lo sentimos, no hemos podido cargar el primer mensaje de este hilo. Por favor, intenta crear una nueva party.').then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
             return;
         }
 
@@ -632,6 +630,7 @@ client.on(Events.MessageCreate, async message => {
             if (lineas[indiceLinea].includes('<@')) {
                 const mensajeOcupado = await channel.send(`<@${author.id}>, ese puesto ya está ocupado. Intenta con otro número.`);
                 setTimeout(() => mensajeOcupado.delete().catch(() => {}), 10000);
+                await message.delete().catch(() => {});
                 return;
             }
             
@@ -649,7 +648,7 @@ client.on(Events.MessageCreate, async message => {
                     const rol = m.content;
                     const nuevoValor = `${numero}. ${rol} <@${author.id}>`;
                     lineas[indiceLinea] = nuevoValor;
-                    await mensajePrincipal.edit(lineas.join('\n'));
+                    await mensajePrincipal.edit({ content: lineas.join('\n'), components: mensajePrincipal.components });
                     await channel.send(`<@${author.id}>, te has apuntado en el puesto **${numero}** como **${rol}**.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
                 });
     
@@ -661,12 +660,14 @@ client.on(Events.MessageCreate, async message => {
             } else {
                 const nuevoValor = `${lineaOriginal} <@${author.id}>`;
                 lineas[indiceLinea] = nuevoValor;
-                await mensajePrincipal.edit(lineas.join('\n'));
+                await mensajePrincipal.edit({ content: lineas.join('\n'), components: mensajePrincipal.components });
                 await channel.send(`<@${author.id}>, te has apuntado en el puesto **${numero}** con éxito.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
             }
         }
+        await message.delete().catch(() => {});
     } catch (error) {
         console.error('Error procesando mensaje en el hilo:', error);
+        await message.delete().catch(() => {});
         channel.send(`Hubo un error al procesar tu solicitud, <@${author.id}>. Por favor, inténtalo de nuevo.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
     }
 });
