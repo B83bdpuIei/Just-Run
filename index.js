@@ -63,12 +63,13 @@ client.on('ready', async () => {
         db = null;
     }
 
-    try {
-        await client.application.commands.set([]);
-        console.log('✅ Comandos antiguos eliminados.');
-    } catch (error) {
-        console.error('Error al eliminar comandos antiguos:', error);
-    }
+    // Código corregido: Eliminamos la línea que borra todos los comandos.
+    // try {
+    //     await client.application.commands.set([]);
+    //     console.log('✅ Comandos antiguos eliminados.');
+    // } catch (error) {
+    //     console.error('Error al eliminar comandos antiguos:', error);
+    // }
 
     const commands = [
         new SlashCommandBuilder()
