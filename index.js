@@ -467,11 +467,13 @@ ${compoContent}`;
                     .setLabel('❌ Desapuntarme')
                     .setStyle(ButtonStyle.Danger);
 
-                const row = new ActionRowBuilder().addComponents(desapuntarmeButton);
+                const buttonRow = new ActionRowBuilder().addComponents(desapuntarmeButton);
 
-                const mensajeInicial = await interaction.channel.send({ content: mensajeCompleto, components: [row] });
+                // ENVIAMOS EL MENSAJE PRINCIPAL EN EL CANAL ORIGINAL CON EL BOTÓN
+                const mensajePrincipal = await interaction.channel.send({ content: mensajeCompleto, components: [buttonRow] });
                 
-                const hilo = await mensajeInicial.startThread({
+                // CREAMOS EL HILO A PARTIR DEL MENSAJE PRINCIPAL
+                const hilo = await mensajePrincipal.startThread({
                     name: "Inscripción de la party",
                     autoArchiveDuration: 60,
                 });
@@ -508,19 +510,12 @@ ${compoContent}`;
             const message = interaction.message;
             const user = interaction.user;
 
-            if (!message.channel.isThread()) {
-                await interaction.editReply('Este botón solo funciona en un hilo de party.');
-                return;
-            }
-
-            const mensajePrincipal = await message.channel.fetchStarterMessage();
-            if (!mensajePrincipal || message.id !== mensajePrincipal.id) {
-                await interaction.editReply('Este no es el mensaje principal de la party.');
-                return;
-            }
-
+            // En esta lógica, el botón se encuentra en el mensaje principal, que no es un hilo
+            // Por lo tanto, no es necesario comprobar si message.channel.isThread()
+            // Y la lógica de fetchStarterMessage no aplica
+            
             try {
-                let lineas = mensajePrincipal.content.split('\n');
+                let lineas = message.content.split('\n');
                 let oldSpotIndex = -1;
 
                 for (const [index, linea] of lineas.entries()) {
@@ -547,7 +542,7 @@ ${compoContent}`;
                     lineas[oldSpotIndex] = oldLine.replace(regexClean, '').trim();
                 }
 
-                await mensajePrincipal.edit(lineas.join('\n'));
+                await message.edit({ content: lineas.join('\n'), components: message.components });
                 
                 await interaction.editReply(`✅ Te has desapuntado del puesto **${oldSpot}**.`);
             } catch (error) {
@@ -576,85 +571,6 @@ ${compoContent}`;
                 await interaction.reply({ content: 'Hubo un error al guardar el template.', flags: [MessageFlags.Ephemeral] });
             }
             return;
-        }
-
-        if (interaction.customId.startsWith('start_comp_modal_')) {
-            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-
-            const compoId = interaction.customId.split('_')[3];
-
-            if (!db) {
-                await interaction.editReply('Error: La base de datos no está disponible.');
-                return;
-            }
-
-            try {
-                const composSnapshot = await getDocs(composCollectionRef);
-                const selectedCompo = composSnapshot.docs.find(doc => doc.id === compoId);
-                if (!selectedCompo) {
-                    await interaction.editReply('Error: El template de party no fue encontrado.');
-                    return;
-                }
-                const compoContent = selectedCompo.data().content;
-
-                const horaMasseo = interaction.fields.getTextInputValue('hora_masseo');
-                const tiempoFinalizacionStr = interaction.fields.getTextInputValue('tiempo_finalizacion');
-                const mensajeEncabezado = interaction.fields.getTextInputValue('mensaje_encabezado');
-
-                let totalMilisegundos = 0;
-                const regexHoras = /(\d+)\s*h/;
-                const regexMinutos = /(\d+)\s*m/;
-
-                const matchHoras = tiempoFinalizacionStr.match(regexHoras);
-                const matchMinutos = tiempoFinalizacionStr.match(regexMinutos);
-
-                if (matchHoras) {
-                    totalMilisegundos += parseInt(matchHoras[1]) * 60 * 60 * 1000;
-                }
-                if (matchMinutos) {
-                    totalMilisegundos += parseInt(matchMinutos[1]) * 60 * 1000;
-                }
-
-                const fechaFinalizacion = Math.floor((Date.now() + totalMilisegundos) / 1000);
-
-                const mensajeCompleto = `${horaMasseo}
-${mensajeEncabezado || ''}
-
-**INSCRIPCIONES TERMINAN:** <t:${fechaFinalizacion}:R>
-
-${compoContent}`;
-
-                const mensajeInicial = await interaction.channel.send({ content: mensajeCompleto });
-                
-                const hilo = await mensajeInicial.startThread({
-                    name: "Inscripción de la party",
-                    autoArchiveDuration: 60,
-                });
-                
-                await hilo.send("¡Escribe un número para apuntarte!");
-
-                if (totalMilisegundos > 0) {
-                    await hilo.send(`El hilo se bloqueará automáticamente en **${tiempoFinalizacionStr}**.`);
-                    
-                    setTimeout(async () => {
-                        try {
-                            const canalHilo = await client.channels.fetch(hilo.id);
-                            if (canalHilo && !canalHilo.archived) {
-                                await canalHilo.setLocked(true);
-                                await canalHilo.send('¡Las inscripciones han terminado! Este hilo ha sido bloqueado y ya no se pueden añadir más participantes.');
-                            }
-                        } catch (error) {
-                            console.error(`Error al bloquear el hilo ${hilo.id}:`, error);
-                        }
-                    }, totalMilisegundos);
-                }
-
-                await interaction.editReply({ content: `✅ La party se ha iniciado correctamente. Puedes verla en <#${hilo.id}>.`, flags: [MessageFlags.Ephemeral] });
-
-            } catch (error) {
-                console.error('Error al crear la party o el hilo:', error);
-                await interaction.editReply({ content: 'Hubo un error al intentar crear la party. Por favor, asegúrate de que el bot tenga los permisos necesarios.', flags: [MessageFlags.Ephemeral] });
-            }
         }
     }
 });
