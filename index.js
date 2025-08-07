@@ -114,7 +114,6 @@ client.on('ready', async () => {
 
 // Evento: Interacción de comandos y modals
 client.on(Events.InteractionCreate, async interaction => {
-    // --- CORRECCIÓN: Manejar las interacciones por tipo para evitar el bucle ---
     if (interaction.isChatInputCommand()) {
         const { commandName } = interaction;
         
@@ -537,3 +536,4 @@ ${compoContent}`;
 });
 
 client.login(process.env.TOKEN);
+
