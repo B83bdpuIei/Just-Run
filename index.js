@@ -204,17 +204,25 @@ client.on(Events.InteractionCreate, async interaction => {
             }
             
             let lineas = mensajePrincipal.content.split('\n');
-            const lineaIndex = lineas.findIndex(linea => linea.startsWith(`${participante.spot}.`));
+            // CORRECCIÓN: Para ser compatible con hilos antiguos donde participante era un número
+            const spot = typeof participante === 'object' ? participante.spot : participante;
+            const originalContent = typeof participante === 'object' ? participante.originalContent : null;
+
+            const lineaIndex = lineas.findIndex(linea => linea.startsWith(`${spot}.`));
             
             if (lineaIndex !== -1) {
-                 // CORRECCIÓN: Restaura el puesto a su estado original guardado
-                lineas[lineaIndex] = participante.originalContent;
+                if (originalContent) {
+                    lineas[lineaIndex] = originalContent;
+                } else {
+                    // Si no tenemos el originalContent, intentamos adivinar si era X o un rol
+                    lineas[lineaIndex] = lineas[lineaIndex].includes('. X') ? `${spot}. X` : lineas[lineaIndex].split(`<@${usuarioARemover.id}>`)[0].trim();
+                }
                 hiloInfo.participantes.delete(usuarioARemover.id);
             }
 
             await mensajePrincipal.edit(lineas.join('\n'));
 
-            await interaction.editReply(`✅ Usuario <@${usuarioARemover.id}> eliminado del puesto **${participante.spot}**.`);
+            await interaction.editReply(`✅ Usuario <@${usuarioARemover.id}> eliminado del puesto **${spot}**.`);
             
         } else if (commandName === 'add_user_compo') {
             await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
@@ -244,10 +252,17 @@ client.on(Events.InteractionCreate, async interaction => {
             const participanteAnterior = hiloInfo.participantes.get(usuarioAAgregar.id);
             
             if (participanteAnterior) {
-                const lineaAnteriorIndex = lineas.findIndex(linea => linea.startsWith(`${participanteAnterior.spot}.`));
+                // CORRECCIÓN: Para ser compatible con hilos antiguos donde participante era un número
+                const oldSpot = typeof participanteAnterior === 'object' ? participanteAnterior.spot : participanteAnterior;
+                const originalContent = typeof participanteAnterior === 'object' ? participanteAnterior.originalContent : null;
+                
+                const lineaAnteriorIndex = lineas.findIndex(linea => linea.startsWith(`${oldSpot}.`));
                 if (lineaAnteriorIndex !== -1) {
-                    // CORRECCIÓN: Restaura el puesto a su estado original guardado
-                    lineas[lineaAnteriorIndex] = participanteAnterior.originalContent;
+                     if (originalContent) {
+                         lineas[lineaAnteriorIndex] = originalContent;
+                     } else {
+                         lineas[lineaAnteriorIndex] = lineas[lineaAnteriorIndex].includes('. X') ? `${oldSpot}. X` : lineas[lineaAnteriorIndex].split(`<@${usuarioAAgregar.id}>`)[0].trim();
+                     }
                     hiloInfo.participantes.delete(usuarioAAgregar.id);
                 }
             }
@@ -258,7 +273,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.editReply(`El puesto **${puestoAAgregar}** no es válido.`);
                 return;
             }
-
+            
             if (lineas[lineaNuevaIndex].includes('<@')) {
                 await interaction.editReply(`El puesto **${puestoAAgregar}** ya está ocupado.`);
                 return;
@@ -280,10 +295,9 @@ client.on(Events.InteractionCreate, async interaction => {
                     const nuevoValor = `${puestoAAgregar}. ${rol} <@${usuarioAAgregar.id}>`;
                     lineas[lineaNuevaIndex] = nuevoValor;
                     await mensajePrincipal.edit(lineas.join('\n'));
+                    hiloInfo.participantes.set(usuarioAAgregar.id, { spot: puestoAAgregar, originalContent: lineaOriginal });
                     await interaction.editReply(`✅ Usuario <@${usuarioAAgregar.id}> añadido al puesto **${puestoAAgregar}** como **${rol}**.`);
                     
-                    // CORRECCIÓN: Se guarda el estado original para futura referencia
-                    hiloInfo.participantes.set(usuarioAAgregar.id, { spot: puestoAAgregar, originalContent: lineaOriginal });
                     colector.stop();
                 });
 
@@ -296,8 +310,6 @@ client.on(Events.InteractionCreate, async interaction => {
                 const nuevoValor = `${lineaOriginal} <@${usuarioAAgregar.id}>`;
                 lineas[lineaNuevaIndex] = nuevoValor;
                 await mensajePrincipal.edit(lineas.join('\n'));
-
-                // CORRECCIÓN: Se guarda el estado original para futura referencia
                 hiloInfo.participantes.set(usuarioAAgregar.id, { spot: puestoAAgregar, originalContent: lineaOriginal });
                 
                 await interaction.editReply(`✅ Usuario <@${usuarioAAgregar.id}> añadido al puesto **${puestoAAgregar}**.`);
@@ -491,10 +503,17 @@ client.on(Events.MessageCreate, async message => {
     
         // Si el usuario ya está apuntado, lo eliminamos de su puesto anterior
         if (oldSpot) {
-            const lineaAnterior = lineas.findIndex(linea => linea.startsWith(`${oldSpot.spot}.`));
+            // CORRECCIÓN: Compatibilidad con hilos antiguos donde oldSpot era un número
+            const oldSpotNumber = typeof oldSpot === 'object' ? oldSpot.spot : oldSpot;
+            const originalContent = typeof oldSpot === 'object' ? oldSpot.originalContent : null;
+            
+            const lineaAnterior = lineas.findIndex(linea => linea.startsWith(`${oldSpotNumber}.`));
             if (lineaAnterior !== -1) {
-                // CORRECCIÓN: Restaura el puesto a su estado original guardado
-                lineas[lineaAnterior] = oldSpot.originalContent;
+                if (originalContent) {
+                    lineas[lineaAnterior] = originalContent;
+                } else {
+                    lineas[lineaAnterior] = lineas[lineaAnterior].includes('. X') ? `${oldSpotNumber}. X` : lineas[lineaAnterior].split(`<@${author.id}>`)[0].trim();
+                }
                 hiloInfo.participantes.delete(author.id);
             }
         }
@@ -507,9 +526,10 @@ client.on(Events.MessageCreate, async message => {
                 setTimeout(() => mensajeOcupado.delete().catch(() => {}), 10000);
                 return;
             }
+            
+            const lineaOriginal = lineas[indiceLinea];
 
-            // CORRECCIÓN: Nueva lógica para preguntar por el rol si la línea contiene ". X"
-            if (lineas[indiceLinea].includes('. X')) {
+            if (lineaOriginal.includes('. X')) {
                 const preguntaRol = await channel.send(`<@${author.id}>, te has apuntado en el puesto **${numero}**. ¿Qué rol vas a ir?`);
                 
                 const filtro = m => m.author.id === author.id;
@@ -523,7 +543,7 @@ client.on(Events.MessageCreate, async message => {
                     lineas[indiceLinea] = nuevoValor;
                     await mensajeAEditar.edit(lineas.join('\n'));
                     // CORRECCIÓN: Se guarda el estado original para futura referencia
-                    hiloInfo.participantes.set(author.id, { spot: numero, originalContent: lineas[indiceLinea] });
+                    hiloInfo.participantes.set(author.id, { spot: numero, originalContent: lineaOriginal });
                     await channel.send(`<@${author.id}>, te has apuntado en el puesto **${numero}** como **${rol}**.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
                 });
     
@@ -533,7 +553,6 @@ client.on(Events.MessageCreate, async message => {
                     }
                 });
             } else {
-                const lineaOriginal = lineas[indiceLinea];
                 const nuevoValor = `${lineaOriginal} <@${author.id}>`;
                 lineas[indiceLinea] = nuevoValor;
                 await mensajeAEditar.edit(lineas.join('\n'));
