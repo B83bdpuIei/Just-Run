@@ -18,9 +18,10 @@ const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMessageReactions,
     ],
-    partials: [Partials.Channel]
+    partials: [Partials.Channel, Partials.Message, Partials.Reaction]
 });
 
 // --- Servidor Web para mantener el Bot Activo (Render) ---
@@ -220,7 +221,6 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 const numeroPuesto = parseInt(lineas[lineaEncontrada].trim().split('.')[0]);
                 
-                // CORRECCIÓN: Lógica para reemplazar el nombre con "X" o dejar el rol si existe
                 const lineaOriginal = lineas[lineaEncontrada].replace(regexUsuario, '').trim();
                 const partesLinea = lineaOriginal.split('.');
                 const rolParte = partesLinea.length > 1 ? partesLinea.slice(1).join('.').trim() : '';
@@ -468,11 +468,11 @@ ${compoContent}`;
                     name: "Inscripción de la party",
                     autoArchiveDuration: 60,
                 });
-
-                // No se necesita el objeto hilosMonitoreados
-                // Ya no gestionamos el estado de manera global
                 
                 await hilo.send("¡Escribe un número para apuntarte!");
+
+                // Agregamos la reacción ❌ al mensaje principal para que los usuarios puedan desapuntarse
+                await mensajeInicial.react('❌');
 
                 if (totalMilisegundos > 0) {
                     await hilo.send(`El hilo se bloqueará automáticamente en **${tiempoFinalizacionStr}**.`);
@@ -500,6 +500,87 @@ ${compoContent}`;
     }
 });
 
+// Evento: Reacciones en el canal para desapuntarse
+client.on(Events.MessageReactionAdd, async (reaction, user) => {
+    // Si la reacción no es del usuario, es la del bot o no es el emoji ❌, lo ignoramos.
+    if (user.bot || reaction.emoji.name !== '❌') {
+        return;
+    }
+    
+    // Obtiene el mensaje completo, si no está en caché
+    if (reaction.partial) {
+        try {
+            await reaction.fetch();
+        } catch (error) {
+            console.error('Error al obtener el mensaje de la reacción:', error);
+            return;
+        }
+    }
+
+    const message = reaction.message;
+
+    // Solo procesamos reacciones en el mensaje principal de un hilo de party
+    if (!message.channel.isThread()) {
+        await reaction.users.remove(user.id).catch(() => {});
+        return;
+    }
+
+    const mensajePrincipal = await message.channel.fetchStarterMessage();
+    if (!mensajePrincipal || message.id !== mensajePrincipal.id) {
+        await reaction.users.remove(user.id).catch(() => {});
+        return;
+    }
+
+    try {
+        let lineas = mensajePrincipal.content.split('\n');
+
+        let oldSpotIndex = -1;
+        for (const [index, linea] of lineas.entries()) {
+            if (linea.includes(`<@${user.id}>`)) {
+                oldSpotIndex = index;
+                break;
+            }
+        }
+        
+        if (oldSpotIndex === -1) {
+            // CORRECCIÓN CLAVE: El usuario que reacciona no está en la lista. Se elimina su reacción y no se hace nada más.
+            await reaction.users.remove(user.id).catch(() => {});
+            return;
+        }
+
+        const oldLine = lineas[oldSpotIndex];
+        const oldSpot = parseInt(oldLine.trim().split('.')[0]);
+
+        // Lógica de desapuntado (igual que en el comando)
+        const regexUser = new RegExp(`<@${user.id}>`);
+        const remainingContent = oldLine.replace(regexUser, '').trim();
+
+        // Si el puesto es uno de los que originalmente tenían 'X'
+        if (oldSpot >= 35) {
+            lineas[oldSpotIndex] = `${oldSpot}. X`;
+        } else {
+            // Si el puesto tenía un rol, lo deja sin el nombre del usuario
+            const rolMatch = remainingContent.match(/(\d+\.\s*)(.*)/);
+            if (rolMatch) {
+                lineas[oldSpotIndex] = `${rolMatch[1]}${rolMatch[2]}`;
+            } else {
+                lineas[oldSpotIndex] = `${oldSpot}.`;
+            }
+        }
+
+        await mensajePrincipal.edit(lineas.join('\n'));
+        await reaction.users.remove(user.id).catch(() => {}); // Quita la reacción del usuario
+        
+        const mensajeConfirmacion = await message.channel.send(`✅ <@${user.id}> se ha desapuntado del puesto **${oldSpot}**.`);
+        setTimeout(() => mensajeConfirmacion.delete().catch(() => {}), 10000);
+
+    } catch (error) {
+        console.error('Error procesando reacción:', error);
+    }
+});
+
+
+// Evento: Mensajes en el canal para las inscripciones
 client.on(Events.MessageCreate, async message => {
     if (message.author.bot || !message.channel.isThread()) {
         return;
@@ -515,7 +596,6 @@ client.on(Events.MessageCreate, async message => {
     try {
         await message.delete();
 
-        // Obtiene el mensaje principal del hilo para trabajar con él
         const mensajePrincipal = await channel.fetchStarterMessage();
         if (!mensajePrincipal) {
             return;
@@ -523,25 +603,30 @@ client.on(Events.MessageCreate, async message => {
 
         let lineas = mensajePrincipal.content.split('\n');
         
-        // CORRECCIÓN: Parseamos la lista de participantes en cada interacción para no depender del estado global
-        let oldSpot = null;
+        let oldSpotIndex = -1;
         for (const [index, linea] of lineas.entries()) {
             const regex = new RegExp(`<@${author.id}>`);
             if (regex.test(linea)) {
-                const match = linea.match(/^(\d+)\./);
-                if (match) {
-                    oldSpot = parseInt(match[1]);
-                    const remainingContent = linea.replace(regex, '').trim();
-                    const newContent = remainingContent.endsWith('.') ? remainingContent.slice(0, -1).trim() : remainingContent;
-                    
-                    if (newContent === 'X') {
-                        lineas[index] = `${oldSpot}. X`;
-                    } else if (newContent !== '') {
-                        lineas[index] = `${oldSpot}. ${newContent}`;
-                    } else {
-                        // En caso de que la línea no contenga un rol ni una X
-                        lineas[index] = `${oldSpot}.`;
-                    }
+                oldSpotIndex = index;
+                break;
+            }
+        }
+
+        if (oldSpotIndex !== -1) {
+            const oldLine = lineas[oldSpotIndex];
+            const oldSpot = parseInt(oldLine.trim().split('.')[0]);
+            
+            const regexUser = new RegExp(`<@${author.id}>`);
+            const remainingContent = oldLine.replace(regexUser, '').trim();
+
+            if (oldSpot >= 35) {
+                lineas[oldSpotIndex] = `${oldSpot}. X`;
+            } else {
+                const rolMatch = remainingContent.match(/(\d+\.\s*)(.*)/);
+                if (rolMatch) {
+                    lineas[oldSpotIndex] = `${rolMatch[1]}${rolMatch[2]}`;
+                } else {
+                    lineas[oldSpotIndex] = `${oldSpot}.`;
                 }
             }
         }
