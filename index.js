@@ -114,7 +114,7 @@ client.on('ready', async () => {
 function parsearParticipantes(lineas) {
     const participantes = new Map();
     for (const linea of lineas) {
-        const match = linea.match(/(\d+)\.(.*?)<@(\d+)>/);
+        const match = linea.match(/(\d+)\.(.*?)<@!?(\d+)>/);
         if (match) {
             const numeroPuesto = parseInt(match[1]);
             const userId = match[3];
@@ -540,25 +540,23 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
     // A partir de aquí, se ejecuta la lógica de desapuntar solo si es la reacción ❌
     try {
         let lineas = mensajePrincipal.content.split('\n');
-
-        let oldSpotIndex = -1;
-        for (const [index, linea] of lineas.entries()) {
-            if (linea.includes(`<@${user.id}>`)) {
-                oldSpotIndex = index;
-                break;
-            }
-        }
+        const participantes = parsearParticipantes(lineas);
         
-        if (oldSpotIndex === -1) {
+        const oldSpot = participantes.get(user.id);
+        if (!oldSpot) {
             // El usuario que reacciona no está en la lista. Se elimina su reacción y no se hace nada más.
             await reaction.users.remove(user.id).catch(() => {});
             return;
         }
 
-        const oldLine = lineas[oldSpotIndex];
-        const oldSpot = parseInt(oldLine.trim().split('.')[0]);
+        const oldSpotIndex = lineas.findIndex(linea => linea.startsWith(`${oldSpot}.`));
+        if (oldSpotIndex === -1) {
+             await reaction.users.remove(user.id).catch(() => {});
+             return;
+        }
 
-        const regexUser = new RegExp(`<@${user.id}>`);
+        const oldLine = lineas[oldSpotIndex];
+        const regexUser = new RegExp(`<@!?${user.id}>`);
         const remainingContent = oldLine.replace(regexUser, '').trim();
 
         // Si el puesto es uno de los que originalmente tenían 'X'
@@ -608,21 +606,19 @@ client.on(Events.MessageCreate, async message => {
         }
 
         let lineas = mensajePrincipal.content.split('\n');
+        const participantes = parsearParticipantes(lineas);
         
-        let oldSpotIndex = -1;
-        for (const [index, linea] of lineas.entries()) {
-            const regex = new RegExp(`<@${author.id}>`);
-            if (regex.test(linea)) {
-                oldSpotIndex = index;
-                break;
-            }
-        }
+        const oldSpot = participantes.get(author.id);
 
-        if (oldSpotIndex !== -1) {
-            const oldLine = lineas[oldSpotIndex];
-            const oldSpot = parseInt(oldLine.trim().split('.')[0]);
+        if (oldSpot) {
+            const oldSpotIndex = lineas.findIndex(linea => linea.startsWith(`${oldSpot}.`));
+            if (oldSpotIndex === -1) {
+                // No se encontró el puesto anterior, salimos.
+                return;
+            }
             
-            const regexUser = new RegExp(`<@${author.id}>`);
+            const oldLine = lineas[oldSpotIndex];
+            const regexUser = new RegExp(`<@!?${author.id}>`);
             const remainingContent = oldLine.replace(regexUser, '').trim();
 
             if (oldSpot >= 35) {
