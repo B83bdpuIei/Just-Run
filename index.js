@@ -38,7 +38,6 @@ let composCollectionRef;
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
 // === CONFIGURACIÓN DE FIRESTORE: AÑADE TU OBJETO AQUÍ ===
-// Reemplaza los valores de este objeto con los de tu proyecto de Firebase.
 const firebaseConfig = {
     apiKey: "AIzaSyCaPKwXut-_NA0se1WPgpNltWNWU1RSVgQ",
     authDomain: "just-run-af870.firebaseapp.com",
@@ -123,7 +122,7 @@ function parsearParticipantes(lineas) {
     return participantes;
 }
 
-// Evento: Interacción de comandos y modals
+// Evento: Interacción de comandos, modales y botones
 client.on(Events.InteractionCreate, async interaction => {
     if (interaction.isChatInputCommand()) {
         const { commandName } = interaction;
@@ -471,16 +470,16 @@ ${compoContent}`;
 
                 const buttonRow = new ActionRowBuilder().addComponents(desapuntarmeButton);
 
-                // ENVIAMOS EL MENSAJE PRINCIPAL EN EL CANAL ORIGINAL CON EL BOTÓN
-                const mensajePrincipal = await interaction.channel.send({ content: mensajeCompleto, components: [buttonRow] });
+                // Enviamos el mensaje principal y el hilo se crea a partir de él.
+                const mensajePrincipal = await interaction.channel.send({ content: mensajeCompleto });
                 
-                // CREAMOS EL HILO A PARTIR DEL MENSAJE PRINCIPAL
                 const hilo = await mensajePrincipal.startThread({
                     name: "Inscripción de la party",
                     autoArchiveDuration: 60,
                 });
                 
-                await hilo.send("¡Escribe un número para apuntarte!");
+                // En lugar de enviar el botón en el mensaje principal, lo enviamos en el hilo.
+                await hilo.send({ content: "¡Escribe un número para apuntarte!", components: [buttonRow] });
 
                 if (totalMilisegundos > 0) {
                     await hilo.send(`El hilo se bloqueará automáticamente en **${tiempoFinalizacionStr}**.`);
@@ -511,9 +510,21 @@ ${compoContent}`;
 
             const message = interaction.message;
             const user = interaction.user;
+
+            // La lógica para desapuntar ahora busca el mensaje principal del hilo, que es donde está la lista.
+            if (!message.channel.isThread()) {
+                await interaction.editReply('Este botón solo funciona en un hilo de party.');
+                return;
+            }
+
+            const mensajePrincipal = await message.channel.fetchStarterMessage();
+            if (!mensajePrincipal) {
+                await interaction.editReply('No se pudo encontrar el mensaje principal de la party. Inténtalo de nuevo.');
+                return;
+            }
             
             try {
-                let lineas = message.content.split('\n');
+                let lineas = mensajePrincipal.content.split('\n');
                 let oldSpotIndex = -1;
 
                 for (const [index, linea] of lineas.entries()) {
@@ -540,7 +551,8 @@ ${compoContent}`;
                     lineas[oldSpotIndex] = oldLine.replace(regexClean, '').trim();
                 }
 
-                await message.edit({ content: lineas.join('\n'), components: message.components });
+                // Editamos el mensaje principal, no el del hilo.
+                await mensajePrincipal.edit({ content: lineas.join('\n') });
                 
                 await interaction.editReply(`✅ Te has desapuntado del puesto **${oldSpot}**.`);
             } catch (error) {
@@ -582,15 +594,69 @@ client.on(Events.MessageCreate, async message => {
     const { channel, author, content } = message;
     const numero = parseInt(content.trim());
     
+    // Verificamos si el mensaje es para desapuntarse
+    if (content.trim().toLowerCase() === 'desapuntar') {
+        const mensajePrincipal = await channel.fetchStarterMessage().catch(() => null);
+        if (!mensajePrincipal) {
+            await message.delete().catch(() => {});
+            await channel.send('Lo sentimos, no hemos podido cargar el primer mensaje de este hilo. Por favor, intenta crear una nueva party.').then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
+            return;
+        }
+
+        try {
+            let lineas = mensajePrincipal.content.split('\n');
+            let oldSpotIndex = -1;
+
+            for (const [index, linea] of lineas.entries()) {
+                if (linea.includes(`<@${author.id}>`)) {
+                    oldSpotIndex = index;
+                    break;
+                }
+            }
+            
+            if (oldSpotIndex === -1) {
+                await message.delete().catch(() => {});
+                const mensajeError = await channel.send(`❌ <@${author.id}>, no estás apuntado en esta party.`);
+                setTimeout(() => mensajeError.delete().catch(() => {}), 10000);
+                return;
+            }
+
+            const oldLine = lineas[oldSpotIndex];
+            const oldSpot = parseInt(oldLine.trim().split('.')[0]);
+            const regexRol = new RegExp(`^${oldSpot}\\.(.*?)(<@${author.id}>)`);
+            const match = oldLine.match(regexRol);
+
+            if (match && match[1].trim() !== '') {
+                lineas[oldSpotIndex] = `${oldSpot}.${match[1].trim()}`;
+            } else {
+                const regexClean = new RegExp(`(<@${author.id}>)`);
+                lineas[oldSpotIndex] = oldLine.replace(regexClean, '').trim();
+            }
+
+            await mensajePrincipal.edit({ content: lineas.join('\n') });
+            await message.delete().catch(() => {});
+
+            const mensajeConfirmacion = await channel.send(`✅ <@${author.id}>, te has desapuntado del puesto **${oldSpot}**.`);
+            setTimeout(() => mensajeConfirmacion.delete().catch(() => {}), 10000);
+            return;
+        } catch (error) {
+            console.error('Error procesando mensaje para desapuntar:', error);
+            await message.delete().catch(() => {});
+            channel.send(`Hubo un error al procesar tu solicitud, <@${author.id}>. Por favor, inténtalo de nuevo.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
+            return;
+        }
+    }
+    
+    // Lógica para apuntarse con números
     if (isNaN(numero) || numero < 1 || numero > 50) {
         return;
     }
 
     try {
+        await message.delete();
+
         const mensajePrincipal = await channel.fetchStarterMessage();
         if (!mensajePrincipal) {
-            await message.delete().catch(() => {});
-            await channel.send('Lo sentimos, no hemos podido cargar el primer mensaje de este hilo. Por favor, intenta crear una nueva party.').then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
             return;
         }
 
@@ -630,11 +696,11 @@ client.on(Events.MessageCreate, async message => {
             if (lineas[indiceLinea].includes('<@')) {
                 const mensajeOcupado = await channel.send(`<@${author.id}>, ese puesto ya está ocupado. Intenta con otro número.`);
                 setTimeout(() => mensajeOcupado.delete().catch(() => {}), 10000);
-                await message.delete().catch(() => {});
                 return;
             }
             
             const lineaOriginal = lineas[indiceLinea];
+            const components = mensajePrincipal.components;
 
             if (lineaOriginal.includes('. X')) {
                 const preguntaRol = await channel.send(`<@${author.id}>, te has apuntado en el puesto **${numero}**. ¿Qué rol vas a ir?`);
@@ -648,7 +714,7 @@ client.on(Events.MessageCreate, async message => {
                     const rol = m.content;
                     const nuevoValor = `${numero}. ${rol} <@${author.id}>`;
                     lineas[indiceLinea] = nuevoValor;
-                    await mensajePrincipal.edit({ content: lineas.join('\n'), components: mensajePrincipal.components });
+                    await mensajePrincipal.edit({ content: lineas.join('\n'), components });
                     await channel.send(`<@${author.id}>, te has apuntado en el puesto **${numero}** como **${rol}**.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
                 });
     
@@ -660,14 +726,12 @@ client.on(Events.MessageCreate, async message => {
             } else {
                 const nuevoValor = `${lineaOriginal} <@${author.id}>`;
                 lineas[indiceLinea] = nuevoValor;
-                await mensajePrincipal.edit({ content: lineas.join('\n'), components: mensajePrincipal.components });
+                await mensajePrincipal.edit({ content: lineas.join('\n'), components });
                 await channel.send(`<@${author.id}>, te has apuntado en el puesto **${numero}** con éxito.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
             }
         }
-        await message.delete().catch(() => {});
     } catch (error) {
         console.error('Error procesando mensaje en el hilo:', error);
-        await message.delete().catch(() => {});
         channel.send(`Hubo un error al procesar tu solicitud, <@${author.id}>. Por favor, inténtalo de nuevo.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
     }
 });
