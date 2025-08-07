@@ -54,16 +54,17 @@ const firebaseConfig = {
 client.on('ready', async () => {
     console.log(`Hemos iniciado sesión como ${client.user.tag}`);
 
-    // === INICIALIZACIÓN DE FIRESTORE ===
+    // === INICIALIZACIÓN DE FIRESTORE CON MANEJADOR DE ERRORES ===
     try {
         const firebaseApp = initializeApp(firebaseConfig);
         db = getFirestore(firebaseApp);
         composCollectionRef = collection(db, `artifacts/${appId}/public/data/compos`);
         console.log('✅ Firestore inicializado con éxito.');
     } catch (error) {
-        console.error('Error al inicializar Firestore:', error);
+        console.error('ERROR CRÍTICO: No se pudo inicializar Firestore. Las funcionalidades de base de datos no estarán disponibles.', error);
+        db = null; // Asignamos null para que la lógica de los comandos lo detecte.
     }
-    // ==================================
+    // =======================================================
 
     try {
         await client.application.commands.set([]);
@@ -119,7 +120,7 @@ client.on(Events.InteractionCreate, async interaction => {
         if (commandName === 'start_comp') {
             await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
-            if (!composCollectionRef) {
+            if (!db) {
                 await interaction.editReply('Error: La base de datos no está disponible. Por favor, inténtalo de nuevo más tarde.');
                 return;
             }
