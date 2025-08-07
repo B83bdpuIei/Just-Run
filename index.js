@@ -114,6 +114,7 @@ client.on('ready', async () => {
 
 // Evento: Interacción de comandos y modals
 client.on(Events.InteractionCreate, async interaction => {
+    // --- CORRECCIÓN: Manejar las interacciones por tipo para evitar el bucle ---
     if (interaction.isChatInputCommand()) {
         const { commandName } = interaction;
 
@@ -307,35 +308,54 @@ client.on(Events.InteractionCreate, async interaction => {
         }
     } else if (interaction.isStringSelectMenu()) {
         if (interaction.customId === 'select_compo') {
-            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+            await interaction.deferUpdate(); // Deferimos la interacción para no mostrar un mensaje de error.
 
             if (!db) {
-                await interaction.editReply('Error: La base de datos no está disponible. Por favor, inténtalo de nuevo más tarde.');
+                await interaction.followUp({ content: 'Error: La base de datos no está disponible. Por favor, inténtalo de nuevo más tarde.', flags: [MessageFlags.Ephemeral] });
                 return;
             }
 
             try {
+                const compoId = interaction.values[0];
                 const composSnapshot = await getDocs(composCollectionRef);
-                const options = composSnapshot.docs.map(doc => ({
-                    label: doc.data().name,
-                    value: doc.id
-                }));
+                const selectedCompo = composSnapshot.docs.find(doc => doc.id === compoId);
+                const compoName = selectedCompo.data().name;
 
-                if (options.length === 0) {
-                    await interaction.editReply('No hay compos de party guardadas. Usa el comando `/add_compo` para añadir una.');
-                    return;
-                }
+                const modal = new ModalBuilder()
+                    .setCustomId(`start_comp_modal_${compoId}`)
+                    .setTitle(`Iniciar Party con: ${compoName}`);
 
-                const selectMenu = new StringSelectMenuBuilder()
-                    .setCustomId('select_compo')
-                    .setPlaceholder('Elige un template de party...')
-                    .addOptions(options);
+                const horaMasseoInput = new TextInputBuilder()
+                    .setCustomId('hora_masseo')
+                    .setLabel("Hora del masseo?")
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+                    .setPlaceholder('Ej: 22:00 UTC');
 
-                const row = new ActionRowBuilder().addComponents(selectMenu);
-                await interaction.editReply({ content: 'Por favor, selecciona una compo para iniciar:', components: [row] });
+                const tiempoFinalizacionInput = new TextInputBuilder()
+                    .setCustomId('tiempo_finalizacion')
+                    .setLabel("En cuánto tiempo finalizan las inscripciones?")
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+                    .setPlaceholder('Ej: 2h 30m');
+
+                const mensajeEncabezadoInput = new TextInputBuilder()
+                    .setCustomId('mensaje_encabezado')
+                    .setLabel("Mensaje de encabezado?")
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setRequired(false)
+                    .setPlaceholder('Ej: DESDE HOY 1+2+3+4 SET...');
+
+                modal.addComponents(
+                    new ActionRowBuilder().addComponents(horaMasseoInput),
+                    new ActionRowBuilder().addComponents(tiempoFinalizacionInput),
+                    new ActionRowBuilder().addComponents(mensajeEncabezadoInput)
+                );
+
+                await interaction.showModal(modal);
             } catch (error) {
                 console.error('Error al obtener las compos:', error);
-                await interaction.editReply('Hubo un error al cargar los templates de party.');
+                await interaction.followUp({ content: 'Hubo un error al cargar los templates de party.', flags: [MessageFlags.Ephemeral] });
             }
         }
     } else if (interaction.type === InteractionType.ModalSubmit) {
