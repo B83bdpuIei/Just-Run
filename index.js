@@ -220,10 +220,15 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 const numeroPuesto = parseInt(lineas[lineaEncontrada].trim().split('.')[0]);
                 
-                if (lineas[lineaEncontrada].includes('. X')) {
+                // CORRECCIÓN: Lógica para reemplazar el nombre con "X" o dejar el rol si existe
+                const lineaOriginal = lineas[lineaEncontrada].replace(regexUsuario, '').trim();
+                const partesLinea = lineaOriginal.split('.');
+                const rolParte = partesLinea.length > 1 ? partesLinea.slice(1).join('.').trim() : '';
+
+                if (rolParte === '') {
                     lineas[lineaEncontrada] = `${numeroPuesto}. X`;
                 } else {
-                    lineas[lineaEncontrada] = lineas[lineaEncontrada].split(`<@${usuarioARemover.id}>`)[0].trim();
+                    lineas[lineaEncontrada] = `${numeroPuesto}. ${rolParte}`;
                 }
 
                 await mensajePrincipal.edit(lineas.join('\n'));
@@ -262,10 +267,15 @@ client.on(Events.InteractionCreate, async interaction => {
                 if (participanteAnterior) {
                     const lineaAnteriorIndex = lineas.findIndex(linea => linea.startsWith(`${participanteAnterior}.`));
                     if (lineaAnteriorIndex !== -1) {
-                        if (lineas[lineaAnteriorIndex].includes('. X')) {
+                        const regexUsuario = new RegExp(`<@${usuarioAAgregar.id}>`);
+                        const lineaOriginal = lineas[lineaAnteriorIndex].replace(regexUsuario, '').trim();
+                        const partesLinea = lineaOriginal.split('.');
+                        const rolParte = partesLinea.length > 1 ? partesLinea.slice(1).join('.').trim() : '';
+
+                        if (rolParte === '') {
                             lineas[lineaAnteriorIndex] = `${participanteAnterior}. X`;
                         } else {
-                            lineas[lineaAnteriorIndex] = lineas[lineaAnteriorIndex].split(`<@${usuarioAAgregar.id}>`)[0].trim();
+                            lineas[lineaAnteriorIndex] = `${participanteAnterior}. ${rolParte}`;
                         }
                     }
                 }
@@ -514,28 +524,24 @@ client.on(Events.MessageCreate, async message => {
         let lineas = mensajePrincipal.content.split('\n');
         
         // CORRECCIÓN: Parseamos la lista de participantes en cada interacción para no depender del estado global
-        const participantes = new Map();
         let oldSpot = null;
-        let oldOriginalContent = null;
         for (const [index, linea] of lineas.entries()) {
             const regex = new RegExp(`<@${author.id}>`);
             if (regex.test(linea)) {
                 const match = linea.match(/^(\d+)\./);
                 if (match) {
                     oldSpot = parseInt(match[1]);
-                    oldOriginalContent = linea.replace(regex, '').trim();
-                    if(oldOriginalContent.endsWith('.')) {
-                        oldOriginalContent = oldOriginalContent.slice(0, -1);
-                    }
-                    if (oldOriginalContent.endsWith('X')) {
-                        oldOriginalContent = `${oldSpot}. X`;
-                    } else if (oldOriginalContent.trim() !== '') {
-                        oldOriginalContent = `${oldSpot}. ${oldOriginalContent}`;
-                    } else {
-                         oldOriginalContent = `${oldSpot}.`;
-                    }
+                    const remainingContent = linea.replace(regex, '').trim();
+                    const newContent = remainingContent.endsWith('.') ? remainingContent.slice(0, -1).trim() : remainingContent;
                     
-                    lineas[index] = oldOriginalContent;
+                    if (newContent === 'X') {
+                        lineas[index] = `${oldSpot}. X`;
+                    } else if (newContent !== '') {
+                        lineas[index] = `${oldSpot}. ${newContent}`;
+                    } else {
+                        // En caso de que la línea no contenga un rol ni una X
+                        lineas[index] = `${oldSpot}.`;
+                    }
                 }
             }
         }
@@ -575,7 +581,7 @@ client.on(Events.MessageCreate, async message => {
             } else {
                 const nuevoValor = `${lineaOriginal} <@${author.id}>`;
                 lineas[indiceLinea] = nuevoValor;
-                await mensajeAEditar.edit(lineas.join('\n'));
+                await mensajePrincipal.edit(lineas.join('\n'));
                 await channel.send(`<@${author.id}>, te has apuntado en el puesto **${numero}** con éxito.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
             }
         }
