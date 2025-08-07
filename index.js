@@ -63,14 +63,6 @@ client.on('ready', async () => {
         db = null;
     }
 
-    // Código corregido: Eliminamos la línea que borra todos los comandos.
-    // try {
-    //     await client.application.commands.set([]);
-    //     console.log('✅ Comandos antiguos eliminados.');
-    // } catch (error) {
-    //     console.error('Error al eliminar comandos antiguos:', error);
-    // }
-
     const commands = [
         new SlashCommandBuilder()
             .setName('start_comp')
@@ -134,6 +126,12 @@ client.on(Events.InteractionCreate, async interaction => {
         const { commandName } = interaction;
         
         if (commandName === 'start_comp') {
+            // --- CORRECCIÓN: Evitar usar el comando en hilos ---
+            if (interaction.channel.isThread()) {
+                await interaction.reply({ content: 'Este comando solo se puede usar en un canal de texto normal, no en un hilo.', flags: [MessageFlags.Ephemeral] });
+                return;
+            }
+
             await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
             if (!db) {
@@ -596,11 +594,11 @@ ${compoContent}`;
                     setTimeout(async () => {
                         try {
                             const canalHilo = await client.channels.fetch(hilo.id);
-                            if (canalHilo && !canalHilo.archived) {
+                            if (canalHilo && !canalHilo.archived && !canalHilo.isLockedThread()) { // CORRECCIÓN: Verifica si ya está bloqueado
                                 await canalHilo.setLocked(true);
                                 await canalHilo.send('¡Las inscripciones han terminado! Este hilo ha sido bloqueado y ya no se pueden añadir más participantes.');
                             } else {
-                                console.log(`El hilo ${hilo.id} ya no existe o está archivado. No se puede bloquear.`);
+                                console.log(`El hilo ${hilo.id} ya no existe, está archivado o ya está bloqueado. No se puede bloquear.`);
                             }
                         } catch (error) {
                             console.error(`Error al bloquear el hilo ${hilo.id}:`, error);
@@ -627,6 +625,16 @@ client.on(Events.MessageCreate, async message => {
     const { channel, author, content } = message;
     const numero = parseInt(content.trim());
     
+    // --- CORRECCIÓN: Si el hilo está bloqueado, no se permiten inscripciones ---
+    if (channel.isLockedThread()) {
+        if (content.trim().toLowerCase() !== 'desapuntar' && !isNaN(numero)) {
+            await message.delete().catch(() => {});
+            const mensajeError = await channel.send(`❌ <@${author.id}>, las inscripciones han finalizado. Este hilo está bloqueado.`);
+            setTimeout(() => mensajeError.delete().catch(() => {}), 10000);
+            return;
+        }
+    }
+
     // Verificamos si el mensaje es para desapuntarse
     if (content.trim().toLowerCase() === 'desapuntar') {
         const mensajePrincipal = await channel.fetchStarterMessage().catch(() => null);
