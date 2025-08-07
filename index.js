@@ -237,8 +237,6 @@ client.on(Events.InteractionCreate, async interaction => {
             }
             
             const hilo = interaction.channel;
-
-            // CORRECCIÓN: Añadimos una comprobación más robusta.
             if (!hilo.guild || !hilosMonitoreados[hilo.id]) {
                 await interaction.editReply('Este hilo no está siendo monitoreado por el bot. Por favor, usa este comando en un hilo de party creado recientemente.');
                 return;
@@ -323,10 +321,10 @@ client.on(Events.InteractionCreate, async interaction => {
         }
     } else if (interaction.isStringSelectMenu()) {
         if (interaction.customId === 'select_compo') {
-            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-
+            // CORRECCIÓN: Quitamos el deferReply para evitar que la interacción se responda dos veces
+            // y causar el error InteractionAlreadyReplied.
             if (!db) {
-                await interaction.editReply({ content: 'Error: La base de datos no está disponible. Por favor, inténtalo de nuevo más tarde.', flags: [MessageFlags.Ephemeral] });
+                await interaction.reply({ content: 'Error: La base de datos no está disponible. Por favor, inténtalo de nuevo más tarde.', flags: [MessageFlags.Ephemeral] });
                 return;
             }
 
@@ -370,7 +368,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.showModal(modal);
             } catch (error) {
                 console.error('Error al obtener las compos:', error);
-                await interaction.editReply({ content: 'Hubo un error al cargar los templates de party.', flags: [MessageFlags.Ephemeral] });
+                await interaction.reply({ content: 'Hubo un error al cargar los templates de party.', flags: [MessageFlags.Ephemeral] });
             }
         }
     } else if (interaction.type === InteractionType.ModalSubmit) {
