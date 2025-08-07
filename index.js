@@ -251,6 +251,9 @@ client.on(Events.InteractionCreate, async interaction => {
                 } else {
                     lineas[lineaAnteriorIndex] = lineas[lineaAnteriorIndex].split(`<@${usuarioAAgregar.id}>`)[0].trim();
                 }
+                if (hilosMonitoreados[hilo.id]) {
+                    hilosMonitoreados[hilo.id].participantes.delete(usuarioAAgregar.id);
+                }
             }
 
             const lineaNuevaIndex = lineas.findIndex(linea => linea.startsWith(`${puestoAAgregar}.`));
@@ -266,7 +269,7 @@ client.on(Events.InteractionCreate, async interaction => {
             }
 
             if (puestoAAgregar >= 35) {
-                const preguntaRol = await hilo.send(`<@${interaction.user.id}>, has apuntado a <@${usuarioAAgregar.id}> en el puesto **${puestoAAgregar}**. ¿Qué rol vas a ir?`);
+                const preguntaRol = await hilo.send(`<@${interaction.user.id}>, has apuntado a <@${usuarioAAgregar.id}> en el puesto **${puestoAAgregar}**. ¿Qué rol va a ir?`);
                 
                 const filtro = m => m.author.id === interaction.user.id;
                 const colector = hilo.createMessageCollector({ filter: filtro, max: 1, time: 60000 });
@@ -307,8 +310,6 @@ client.on(Events.InteractionCreate, async interaction => {
         }
     } else if (interaction.isStringSelectMenu()) {
         if (interaction.customId === 'select_compo') {
-            // CORRECCIÓN: Se eliminó el `deferUpdate` para evitar el error 'InteractionAlreadyReplied'.
-            // La respuesta se hará directamente con showModal.
             if (!db) {
                 await interaction.reply({ content: 'Error: La base de datos no está disponible. Por favor, inténtalo de nuevo más tarde.', flags: [MessageFlags.Ephemeral] });
                 return;
@@ -351,6 +352,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     new ActionRowBuilder().addComponents(mensajeEncabezadoInput)
                 );
                 
+                // NOTA: 'showModal' es una respuesta válida, no necesitas deferir
                 await interaction.showModal(modal);
             } catch (error) {
                 console.error('Error al obtener las compos:', error);
@@ -451,87 +453,95 @@ ${compoContent}`;
                         }
                     }, totalMilisegundos);
                 }
+
+                await interaction.editReply(`✅ Party iniciada. El hilo de inscripción se ha creado en <#${hilo.id}>.`);
             } catch (error) {
                 console.error('Error al crear la party o el hilo:', error);
                 await interaction.editReply({ content: 'Hubo un error al intentar crear la party. Por favor, asegúrate de que el bot tenga los permisos necesarios.', flags: [MessageFlags.Ephemeral] });
             }
         }
-    } else if (interaction.isMessageCreate) {
-        if (interaction.author.bot || !interaction.channel.isThread() || !hilosMonitoreados[interaction.channel.id]) {
-            return;
-        }
-        
-        const { channel, author, content } = interaction;
-        const hiloInfo = hilosMonitoreados[channel.id];
-        const numero = parseInt(content);
-    
-        if (isNaN(numero) || numero < 1 || numero > 50) {
-            return;
-        }
+    }
+});
 
-        try {
-            await interaction.delete();
-            const canalPrincipal = await channel.parent.fetch();
-            const mensajeAEditar = await canalPrincipal.messages.fetch(hiloInfo.mensajeId);
-            let lineas = mensajeAEditar.content.split('\n');
-            const oldSpot = hiloInfo.participantes.get(author.id);
+// Evento: Mensajes en el canal para las inscripciones
+client.on(Events.MessageCreate, async message => {
+    // Solo procesa mensajes que estén en un hilo que estamos monitoreando
+    if (message.author.bot || !message.channel.isThread() || !hilosMonitoreados[message.channel.id]) {
+        return;
+    }
     
-            if (oldSpot) {
-                const lineaAnterior = lineas.findIndex(linea => linea.startsWith(`${oldSpot}.`));
-                if (lineaAnterior !== -1) {
-                    if (oldSpot >= 35) {
-                        lineas[lineaAnterior] = `${oldSpot}. X`;
-                    } else {
-                        lineas[lineaAnterior] = lineas[lineaAnterior].split(`<@${author.id}>`)[0].trim();
-                    }
-                    hiloInfo.participantes.delete(author.id);
+    const { channel, author, content } = message;
+    const hiloInfo = hilosMonitoreados[channel.id];
+    const numero = parseInt(content.trim());
+    
+    // Si el mensaje no es un número válido, lo ignoramos
+    if (isNaN(numero) || numero < 1 || numero > 50) {
+        return;
+    }
+
+    try {
+        await message.delete();
+        const canalPrincipal = await channel.parent.fetch();
+        const mensajeAEditar = await canalPrincipal.messages.fetch(hiloInfo.mensajeId);
+        let lineas = mensajeAEditar.content.split('\n');
+        const oldSpot = hiloInfo.participantes.get(author.id);
+    
+        // Si el usuario ya está apuntado, lo eliminamos de su puesto anterior
+        if (oldSpot) {
+            const lineaAnterior = lineas.findIndex(linea => linea.startsWith(`${oldSpot}.`));
+            if (lineaAnterior !== -1) {
+                if (oldSpot >= 35) {
+                    lineas[lineaAnterior] = `${oldSpot}. X`;
+                } else {
+                    lineas[lineaAnterior] = lineas[lineaAnterior].split(`<@${author.id}>`)[0].trim();
                 }
+                hiloInfo.participantes.delete(author.id);
+            }
+        }
+    
+        const indiceLinea = lineas.findIndex(linea => linea.startsWith(`${numero}.`));
+    
+        if (indiceLinea !== -1) {
+            if (lineas[indiceLinea].includes('<@')) {
+                const mensajeOcupado = await channel.send(`<@${author.id}>, ese puesto ya está ocupado. Intenta con otro número.`);
+                setTimeout(() => mensajeOcupado.delete().catch(() => {}), 10000);
+                return;
             }
     
-            const indiceLinea = lineas.findIndex(linea => linea.startsWith(`${numero}.`));
+            if (numero <= 34) {
+                const lineaOriginal = lineas[indiceLinea];
+                const nuevoValor = `${lineaOriginal} <@${author.id}>`;
+                lineas[indiceLinea] = nuevoValor;
+                await mensajeAEditar.edit(lineas.join('\n'));
+                hiloInfo.participantes.set(author.id, numero);
+                await channel.send(`<@${author.id}>, te has apuntado en el puesto **${numero}** con éxito.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
+            } else {
+                const preguntaRol = await channel.send(`<@${author.id}>, te has apuntado en el puesto **${numero}**. ¿Qué rol vas a ir?`);
+                
+                const filtro = m => m.author.id === author.id;
+                const colector = channel.createMessageCollector({ filter: filtro, max: 1, time: 60000 });
     
-            if (indiceLinea !== -1) {
-                if (lineas[indiceLinea].includes('<@')) {
-                    const mensajeOcupado = await channel.send(`<@${author.id}>, ese puesto ya está ocupado. Intenta con otro número.`);
-                    setTimeout(() => mensajeOcupado.delete().catch(() => {}), 10000);
-                    return;
-                }
-    
-                if (numero <= 34) {
-                    const lineaOriginal = lineas[indiceLinea];
-                    const nuevoValor = `${lineaOriginal} <@${author.id}>`;
+                colector.on('collect', async m => {
+                    await preguntaRol.delete().catch(() => {});
+                    await m.delete().catch(() => {});
+                    const rol = m.content;
+                    const nuevoValor = `${numero}. ${rol} <@${author.id}>`;
                     lineas[indiceLinea] = nuevoValor;
                     await mensajeAEditar.edit(lineas.join('\n'));
                     hiloInfo.participantes.set(author.id, numero);
-                    await channel.send(`<@${author.id}>, te has apuntado en el puesto **${numero}** con éxito.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
-                } else {
-                    const preguntaRol = await channel.send(`<@${author.id}>, te has apuntado en el puesto **${numero}**. ¿Qué rol vas a ir?`);
-                    
-                    const filtro = m => m.author.id === author.id;
-                    const colector = channel.createMessageCollector({ filter: filtro, max: 1, time: 60000 });
+                    await channel.send(`<@${author.id}>, te has apuntado en el puesto **${numero}** como **${rol}**.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
+                });
     
-                    colector.on('collect', async m => {
-                        await preguntaRol.delete().catch(() => {});
-                        await m.delete().catch(() => {});
-                        const rol = m.content;
-                        const nuevoValor = `${numero}. ${rol} <@${author.id}>`;
-                        lineas[indiceLinea] = nuevoValor;
-                        await mensajeAEditar.edit(lineas.join('\n'));
-                        hiloInfo.participantes.set(author.id, numero);
-                        await channel.send(`<@${author.id}>, te has apuntado en el puesto **${numero}** como **${rol}**.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
-                    });
-    
-                    colector.on('end', collected => {
-                        if (collected.size === 0) {
-                            channel.send(`<@${author.id}>, no respondiste a tiempo. Por favor, vuelve a intentarlo.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
-                        }
-                    });
-                }
+                colector.on('end', collected => {
+                    if (collected.size === 0) {
+                        channel.send(`<@${author.id}>, no respondiste a tiempo. Por favor, vuelve a intentarlo.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
+                    }
+                });
             }
-        } catch (error) {
-            console.error('Error procesando mensaje en el hilo:', error);
-            channel.send(`Hubo un error al procesar tu solicitud, <@${author.id}>. Por favor, inténtalo de nuevo.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
         }
+    } catch (error) {
+        console.error('Error procesando mensaje en el hilo:', error);
+        channel.send(`Hubo un error al procesar tu solicitud, <@${author.id}>. Por favor, inténtalo de nuevo.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
     }
 });
 
