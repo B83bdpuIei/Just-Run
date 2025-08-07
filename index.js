@@ -221,14 +221,16 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 const numeroPuesto = parseInt(lineas[lineaEncontrada].trim().split('.')[0]);
                 
-                const lineaOriginal = lineas[lineaEncontrada].replace(new RegExp(`<@!?${usuarioARemover.id}>`), '').trim();
-                const partesLinea = lineaOriginal.split('.');
-                const rolParte = partesLinea.length > 1 ? partesLinea.slice(1).join('.').trim() : '';
+                const lineaOriginal = lineas[lineaEncontrada];
+                const regexUsuario = new RegExp(`<@!?${usuarioARemover.id}>`);
+                const rolMatch = lineaOriginal.match(/(\d+)\. (.*?)(<@!?\d+>)?/);
 
-                if (rolParte === '') {
+                if (numeroPuesto >= 35) {
                     lineas[lineaEncontrada] = `${numeroPuesto}. X`;
+                } else if (rolMatch && rolMatch[2]) {
+                    lineas[lineaEncontrada] = `${numeroPuesto}. ${rolMatch[2].trim()}`;
                 } else {
-                    lineas[lineaEncontrada] = `${numeroPuesto}. ${rolParte}`;
+                     lineas[lineaEncontrada] = `${numeroPuesto}.`;
                 }
 
                 await mensajePrincipal.edit(lineas.join('\n'));
@@ -267,15 +269,14 @@ client.on(Events.InteractionCreate, async interaction => {
                 if (participanteAnterior) {
                     const lineaAnteriorIndex = lineas.findIndex(linea => linea.startsWith(`${participanteAnterior}.`));
                     if (lineaAnteriorIndex !== -1) {
-                        const regexUsuario = new RegExp(`<@!?${usuarioAAgregar.id}>`);
-                        const lineaOriginal = lineas[lineaAnteriorIndex].replace(regexUsuario, '').trim();
-                        const partesLinea = lineaOriginal.split('.');
-                        const rolParte = partesLinea.length > 1 ? partesLinea.slice(1).join('.').trim() : '';
-
-                        if (rolParte === '') {
+                        const lineaOriginal = lineas[lineaAnteriorIndex];
+                        const rolMatch = lineaOriginal.match(/(\d+)\. (.*?)(<@!?\d+>)?/);
+                        if (participanteAnterior >= 35) {
                             lineas[lineaAnteriorIndex] = `${participanteAnterior}. X`;
+                        } else if (rolMatch && rolMatch[2]) {
+                            lineas[lineaAnteriorIndex] = `${participanteAnterior}. ${rolMatch[2].trim()}`;
                         } else {
-                            lineas[lineaAnteriorIndex] = `${participanteAnterior}. ${rolParte}`;
+                            lineas[lineaAnteriorIndex] = `${participanteAnterior}.`;
                         }
                     }
                 }
@@ -537,7 +538,6 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
         let lineas = mensajePrincipal.content.split('\n');
 
         let oldSpotIndex = -1;
-        // CORRECCIÓN CLAVE: Buscamos el ID del usuario en cada línea de forma más fiable
         const regexUsuario = new RegExp(`<@!?${user.id}>`);
         for (const [index, linea] of lineas.entries()) {
             if (regexUsuario.test(linea)) {
@@ -554,19 +554,16 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
         const oldLine = lineas[oldSpotIndex];
         const oldSpot = parseInt(oldLine.trim().split('.')[0]);
 
-        const remainingContent = oldLine.replace(regexUsuario, '').trim();
+        const rolMatch = oldLine.match(/(\d+)\. (.*?)(<@!?\d+>)?/);
 
         if (oldSpot >= 35) {
             lineas[oldSpotIndex] = `${oldSpot}. X`;
+        } else if (rolMatch && rolMatch[2]) {
+            lineas[oldSpotIndex] = `${oldSpot}. ${rolMatch[2].trim()}`;
         } else {
-            const rolMatch = remainingContent.match(/(\d+\.\s*)(.*)/);
-            if (rolMatch) {
-                lineas[oldSpotIndex] = `${rolMatch[1]}${rolMatch[2]}`;
-            } else {
-                lineas[oldSpotIndex] = `${oldSpot}.`;
-            }
+             lineas[oldSpotIndex] = `${oldSpot}.`;
         }
-
+        
         await mensajePrincipal.edit(lineas.join('\n'));
         await reaction.users.remove(user.id).catch(() => {});
         
@@ -615,17 +612,14 @@ client.on(Events.MessageCreate, async message => {
             const oldLine = lineas[oldSpotIndex];
             const oldSpot = parseInt(oldLine.trim().split('.')[0]);
             
-            const remainingContent = oldLine.replace(regexUsuario, '').trim();
+            const rolMatch = oldLine.match(/(\d+)\. (.*?)(<@!?\d+>)?/);
 
             if (oldSpot >= 35) {
                 lineas[oldSpotIndex] = `${oldSpot}. X`;
+            } else if (rolMatch && rolMatch[2]) {
+                lineas[oldSpotIndex] = `${oldSpot}. ${rolMatch[2].trim()}`;
             } else {
-                const rolMatch = remainingContent.match(/(\d+\.\s*)(.*)/);
-                if (rolMatch) {
-                    lineas[oldSpotIndex] = `${rolMatch[1]}${rolMatch[2]}`;
-                } else {
-                    lineas[oldSpotIndex] = `${oldSpot}.`;
-                }
+                lineas[oldSpotIndex] = `${oldSpot}.`;
             }
         }
     
