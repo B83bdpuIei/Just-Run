@@ -38,22 +38,26 @@ let db;
 let composCollectionRef;
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
+// === CONFIGURACIÓN DE FIRESTORE: AÑADE TU OBJETO AQUÍ ===
+// Reemplaza los valores de este objeto con los de tu proyecto de Firebase.
+const firebaseConfig = {
+    apiKey: "AIzaSyCaPKwXut-_NA0se1WPgpNltWNWU1RSVgQ",
+    authDomain: "just-run-af870.firebaseapp.com",
+    projectId: "just-run-af870",
+    storageBucket: "just-run-af870.firebasestorage.app",
+    messagingSenderId: "834384222332",
+    appId: "1:834384222332:web:ed7bbb45baf0e80b2711f9",
+    measurementId: "G-8YF78WQ4BQ"
+};
+// =======================================================
+
 client.on('ready', async () => {
     console.log(`Hemos iniciado sesión como ${client.user.tag}`);
 
     // === INICIALIZACIÓN DE FIRESTORE ===
     try {
-        if (typeof __firebase_config === 'undefined' || !__firebase_config) {
-            console.error('ERROR DE INICIALIZACIÓN: La variable de configuración de Firebase (__firebase_config) no está definida.');
-            // Puedes añadir aquí tu propia configuración de Firebase si la ejecutas localmente.
-            // Por ejemplo: const firebaseConfig = { apiKey: "...", authDomain: "...", projectId: "..." };
-            throw new Error('La configuración de Firebase no está disponible en este entorno.');
-        }
-
-        const firebaseConfig = JSON.parse(__firebase_config);
         const firebaseApp = initializeApp(firebaseConfig);
         db = getFirestore(firebaseApp);
-        // Usamos una colección pública para guardar las compos para el bot
         composCollectionRef = collection(db, `artifacts/${appId}/public/data/compos`);
         console.log('✅ Firestore inicializado con éxito.');
     } catch (error) {
@@ -61,7 +65,6 @@ client.on('ready', async () => {
     }
     // ==================================
 
-    // Limpiar comandos antiguos antes de registrar los nuevos
     try {
         await client.application.commands.set([]);
         console.log('✅ Comandos antiguos eliminados.');
@@ -69,11 +72,11 @@ client.on('ready', async () => {
         console.error('Error al eliminar comandos antiguos:', error);
     }
 
-    // === CORRECCIÓN: Renombrado de los comandos ===
     const commands = [
         new SlashCommandBuilder()
             .setName('start_comp')
-            .setDescription('Inicia una nueva inscripción de party con un template.'),
+            .setDescription('Inicia una nueva inscripción de party con un template.')
+            .setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads),
         new SlashCommandBuilder()
             .setName('add_compo')
             .setDescription('Añade un nuevo template de party a la base de datos.')
@@ -97,7 +100,7 @@ client.on('ready', async () => {
                 option.setName('puesto')
                     .setDescription('El número del puesto (1-50).')
                     .setRequired(true))
-            .setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads)
+            .setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads),
     ];
 
     try {
@@ -114,7 +117,7 @@ client.on(Events.InteractionCreate, async interaction => {
         const { commandName } = interaction;
 
         if (commandName === 'start_comp') {
-            await interaction.deferReply({ ephemeral: true });
+            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
             if (!composCollectionRef) {
                 await interaction.editReply('Error: La base de datos no está disponible. Por favor, inténtalo de nuevo más tarde.');
@@ -207,7 +210,7 @@ client.on(Events.InteractionCreate, async interaction => {
             if (numeroPuesto >= 35) {
                 lineas[lineaEncontrada] = `${numeroPuesto}. X`;
             } else {
-                lineas[lineaEncontrada] = lineas[lineaEncontrada].replace(regexUsuario, '').trim();
+                lineas[lineaEncontrada] = lineas[lineaEncontrada].split(`<@${usuarioARemover.id}>`)[0].trim();
             }
 
             await mensajePrincipal.edit(lineas.join('\n'));
@@ -262,7 +265,7 @@ client.on(Events.InteractionCreate, async interaction => {
             }
 
             if (puestoAAgregar >= 35) {
-                const preguntaRol = await hilo.send(`<@${interaction.user.id}>, has apuntado a <@${usuarioAAgregar.id}> en el puesto **${puestoAAgregar}**. ¿Qué rol va a ir?`);
+                const preguntaRol = await hilo.send(`<@${interaction.user.id}>, has apuntado a <@${usuarioAAgregar.id}> en el puesto **${puestoAAgregar}**. ¿Qué rol vas a ir?`);
 
                 const filtro = m => m.author.id === interaction.user.id;
                 const colector = hilo.createMessageCollector({ filter: filtro, max: 1, time: 60000 });
@@ -303,50 +306,36 @@ client.on(Events.InteractionCreate, async interaction => {
         }
     } else if (interaction.isStringSelectMenu()) {
         if (interaction.customId === 'select_compo') {
-            await interaction.deferReply({ ephemeral: true });
+            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
             if (!db) {
                 await interaction.editReply('Error: La base de datos no está disponible. Por favor, inténtalo de nuevo más tarde.');
                 return;
             }
 
-            const compoId = interaction.values[0];
-            const composSnapshot = await getDocs(composCollectionRef);
-            const selectedCompo = composSnapshot.docs.find(doc => doc.id === compoId);
-            const compoName = selectedCompo.data().name;
+            try {
+                const composSnapshot = await getDocs(composCollectionRef);
+                const options = composSnapshot.docs.map(doc => ({
+                    label: doc.data().name,
+                    value: doc.id
+                }));
 
-            const modal = new ModalBuilder()
-                .setCustomId(`start_comp_modal_${compoId}`)
-                .setTitle(`Iniciar Party con: ${compoName}`);
+                if (options.length === 0) {
+                    await interaction.editReply('No hay compos de party guardadas. Usa el comando `/add_compo` para añadir una.');
+                    return;
+                }
 
-            const horaMasseoInput = new TextInputBuilder()
-                .setCustomId('hora_masseo')
-                .setLabel("Hora del masseo?")
-                .setStyle(TextInputStyle.Short)
-                .setRequired(true)
-                .setPlaceholder('Ej: 22:00 UTC');
+                const selectMenu = new StringSelectMenuBuilder()
+                    .setCustomId('select_compo')
+                    .setPlaceholder('Elige un template de party...')
+                    .addOptions(options);
 
-            const tiempoFinalizacionInput = new TextInputBuilder()
-                .setCustomId('tiempo_finalizacion')
-                .setLabel("En cuánto tiempo finalizan las inscripciones?")
-                .setStyle(TextInputStyle.Short)
-                .setRequired(true)
-                .setPlaceholder('Ej: 2h 30m');
-
-            const mensajeEncabezadoInput = new TextInputBuilder()
-                .setCustomId('mensaje_encabezado')
-                .setLabel("Mensaje de encabezado?")
-                .setStyle(TextInputStyle.Paragraph)
-                .setRequired(false)
-                .setPlaceholder('Ej: DESDE HOY 1+2+3+4 SET...');
-
-            modal.addComponents(
-                new ActionRowBuilder().addComponents(horaMasseoInput),
-                new ActionRowBuilder().addComponents(tiempoFinalizacionInput),
-                new ActionRowBuilder().addComponents(mensajeEncabezadoInput)
-            );
-
-            await interaction.showModal(modal);
+                const row = new ActionRowBuilder().addComponents(selectMenu);
+                await interaction.editReply({ content: 'Por favor, selecciona una compo para iniciar:', components: [row] });
+            } catch (error) {
+                console.error('Error al obtener las compos:', error);
+                await interaction.editReply('Hubo un error al cargar los templates de party.');
+            }
         }
     } else if (interaction.type === InteractionType.ModalSubmit) {
         if (interaction.customId === 'add_compo_modal') {
@@ -354,7 +343,7 @@ client.on(Events.InteractionCreate, async interaction => {
             const compoContent = interaction.fields.getTextInputValue('compo_content');
 
             if (!db) {
-                await interaction.reply({ content: 'Error: La base de datos no está disponible.', ephemeral: true });
+                await interaction.reply({ content: 'Error: La base de datos no está disponible.', flags: [MessageFlags.Ephemeral] });
                 return;
             }
 
@@ -363,10 +352,10 @@ client.on(Events.InteractionCreate, async interaction => {
                     name: compoName,
                     content: compoContent
                 });
-                await interaction.reply({ content: `✅ El template de party **${compoName}** ha sido guardado.`, ephemeral: true });
+                await interaction.reply({ content: `✅ El template de party **${compoName}** ha sido guardado.`, flags: [MessageFlags.Ephemeral] });
             } catch (error) {
                 console.error('Error al guardar el template de party:', error);
-                await interaction.reply({ content: 'Hubo un error al guardar el template.', ephemeral: true });
+                await interaction.reply({ content: 'Hubo un error al guardar el template.', flags: [MessageFlags.Ephemeral] });
             }
             return;
         }
