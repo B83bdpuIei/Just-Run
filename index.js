@@ -334,76 +334,51 @@ client.on(Events.InteractionCreate, async interaction => {
         }
     } else if (interaction.isStringSelectMenu()) {
         if (interaction.customId === 'select_compo') {
-            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+            // === CORRECCIÓN ===
+            // Eliminar deferReply para poder usar showModal
+            // await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+            // === FIN DE LA CORRECCIÓN ===
 
             if (!db) {
-                await interaction.editReply({ content: 'Error: La base de datos no está disponible. Por favor, inténtalo de nuevo más tarde.', flags: [MessageFlags.Ephemeral] });
+                // await interaction.editReply({ content: 'Error: ...' }); // Ya no se usa editReply
+                await interaction.reply({ content: 'Error: La base de datos no está disponible. Por favor, inténtalo de nuevo más tarde.', flags: [MessageFlags.Ephemeral] });
                 return;
             }
 
             try {
-                let compoId;
-                if (interaction.values && interaction.values.length > 0) {
-                    compoId = interaction.values[0];
-                } else {
-                    await interaction.editReply({ content: 'Hubo un error al seleccionar el template. Por favor, inténtalo de nuevo.', flags: [MessageFlags.Ephemeral] });
+                const composSnapshot = await getDocs(composCollectionRef);
+                const options = composSnapshot.docs.map(doc => ({
+                    label: doc.data().name,
+                    value: doc.id
+                }));
+
+                if (options.length === 0) {
+                    // await interaction.editReply('No hay compos de party guardadas. Usa el comando `/add_compo` para añadir una.');
+                    await interaction.reply({ content: 'No hay compos de party guardadas. Usa el comando `/add_compo` para añadir una.', flags: [MessageFlags.Ephemeral] });
                     return;
                 }
 
-                const composSnapshot = await getDocs(composCollectionRef);
-                const selectedCompo = composSnapshot.docs.find(doc => doc.id === compoId);
-                if (!selectedCompo) {
-                     await interaction.editReply({ content: 'Error: El template de party no fue encontrado.', flags: [MessageFlags.Ephemeral] });
-                     return;
-                }
-                const compoName = selectedCompo.data().name;
+                const selectMenu = new StringSelectMenuBuilder()
+                    .setCustomId('select_compo')
+                    .setPlaceholder('Elige un template de party...')
+                    .addOptions(options);
 
-                const modal = new ModalBuilder()
-                    .setCustomId(`start_comp_modal_${compoId}`)
-                    .setTitle(`Iniciar Party con: ${compoName}`);
-
-                const horaMasseoInput = new TextInputBuilder()
-                    .setCustomId('hora_masseo')
-                    .setLabel("Hora del masseo?")
-                    .setStyle(TextInputStyle.Short)
-                    .setRequired(true)
-                    .setPlaceholder('Ej: 22:00 UTC');
-
-                const tiempoFinalizacionInput = new TextInputBuilder()
-                    .setCustomId('tiempo_finalizacion')
-                    .setLabel("En cuánto tiempo finalizan las inscripciones?")
-                    .setStyle(TextInputStyle.Short)
-                    .setRequired(true)
-                    .setPlaceholder('Ej: 2h 30m');
-
-                const mensajeEncabezadoInput = new TextInputBuilder()
-                    .setCustomId('mensaje_encabezado')
-                    .setLabel("Mensaje de encabezado?")
-                    .setStyle(TextInputStyle.Paragraph)
-                    .setRequired(false)
-                    .setPlaceholder('Ej: DESDE HOY 1+2+3+4 SET...');
-
-                modal.addComponents(
-                    new ActionRowBuilder().addComponents(horaMasseoInput),
-                    new ActionRowBuilder().addComponents(tiempoFinalizacionInput),
-                    new ActionRowBuilder().addComponents(mensajeEncabezadoInput)
-                );
-                
-                await interaction.showModal(modal);
+                const row = new ActionRowBuilder().addComponents(selectMenu);
+                // await interaction.editReply({ content: 'Por favor, selecciona una compo para iniciar:', components: [row] });
+                await interaction.reply({ content: 'Por favor, selecciona una compo para iniciar:', components: [row], flags: [MessageFlags.Ephemeral] });
             } catch (error) {
                 console.error('Error al obtener las compos:', error);
-                await interaction.editReply({ content: 'Hubo un error al cargar los templates de party.', flags: [MessageFlags.Ephemeral] });
+                // await interaction.editReply('Hubo un error al cargar los templates de party.');
+                await interaction.reply({ content: 'Hubo un error al cargar los templates de party.', flags: [MessageFlags.Ephemeral] });
             }
         }
     } else if (interaction.type === InteractionType.ModalSubmit) {
-        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-
         if (interaction.customId === 'add_compo_modal') {
             const compoName = interaction.fields.getTextInputValue('compo_name');
             const compoContent = interaction.fields.getTextInputValue('compo_content');
             
             if (!db) {
-                await interaction.editReply({ content: 'Error: La base de datos no está disponible.', flags: [MessageFlags.Ephemeral] });
+                await interaction.reply({ content: 'Error: La base de datos no está disponible.', flags: [MessageFlags.Ephemeral] });
                 return;
             }
 
@@ -412,15 +387,17 @@ client.on(Events.InteractionCreate, async interaction => {
                     name: compoName,
                     content: compoContent
                 });
-                await interaction.editReply({ content: `✅ El template de party **${compoName}** ha sido guardado.`, flags: [MessageFlags.Ephemeral] });
+                await interaction.reply({ content: `✅ El template de party **${compoName}** ha sido guardado.`, flags: [MessageFlags.Ephemeral] });
             } catch (error) {
                 console.error('Error al guardar el template de party:', error);
-                await interaction.editReply({ content: 'Hubo un error al guardar el template.', flags: [MessageFlags.Ephemeral] });
+                await interaction.reply({ content: 'Hubo un error al guardar el template.', flags: [MessageFlags.Ephemeral] });
             }
             return;
         }
 
         if (interaction.customId.startsWith('start_comp_modal_')) {
+            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
             const compoId = interaction.customId.split('_')[3];
 
             if (!db) {
@@ -473,6 +450,7 @@ ${compoContent}`;
                 
                 await hilo.send("¡Escribe un número para apuntarte!");
 
+                // Agregamos la reacción ❌ al mensaje principal para que los usuarios puedan desapuntarse
                 await mensajeInicial.react('❌');
 
                 if (totalMilisegundos > 0) {
