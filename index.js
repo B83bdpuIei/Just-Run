@@ -114,7 +114,7 @@ client.on('ready', async () => {
 function parsearParticipantes(lineas) {
     const participantes = new Map();
     for (const linea of lineas) {
-        const match = linea.match(/(\d+)\.(.*?)<@!?(\d+)>/);
+        const match = linea.match(/(\d+)\.(.*?)<@(\d+)>/);
         if (match) {
             const numeroPuesto = parseInt(match[1]);
             const userId = match[3];
@@ -205,9 +205,9 @@ client.on(Events.InteractionCreate, async interaction => {
                 const usuarioARemover = interaction.options.getUser('usuario');
                 let lineas = mensajePrincipal.content.split('\n');
 
+                const regexUsuario = new RegExp(`<@${usuarioARemover.id}>`);
                 let lineaEncontrada = -1;
                 for (let i = 0; i < lineas.length; i++) {
-                    const regexUsuario = new RegExp(`<@!?${usuarioARemover.id}>`);
                     if (regexUsuario.test(lineas[i])) {
                         lineaEncontrada = i;
                         break;
@@ -221,15 +221,14 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 const numeroPuesto = parseInt(lineas[lineaEncontrada].trim().split('.')[0]);
                 
-                const lineaOriginal = lineas[lineaEncontrada];
-                const rolMatch = lineaOriginal.match(/(\d+)\. (.*?)(<@!?\d+>)?/);
+                const lineaOriginal = lineas[lineaEncontrada].replace(regexUsuario, '').trim();
+                const partesLinea = lineaOriginal.split('.');
+                const rolParte = partesLinea.length > 1 ? partesLinea.slice(1).join('.').trim() : '';
 
-                if (numeroPuesto >= 35) {
+                if (rolParte === '') {
                     lineas[lineaEncontrada] = `${numeroPuesto}. X`;
-                } else if (rolMatch && rolMatch[2]) {
-                    lineas[lineaEncontrada] = `${numeroPuesto}. ${rolMatch[2].trim()}`;
                 } else {
-                     lineas[lineaEncontrada] = `${numeroPuesto}.`;
+                    lineas[lineaEncontrada] = `${numeroPuesto}. ${rolParte}`;
                 }
 
                 await mensajePrincipal.edit(lineas.join('\n'));
@@ -268,14 +267,15 @@ client.on(Events.InteractionCreate, async interaction => {
                 if (participanteAnterior) {
                     const lineaAnteriorIndex = lineas.findIndex(linea => linea.startsWith(`${participanteAnterior}.`));
                     if (lineaAnteriorIndex !== -1) {
-                        const lineaOriginal = lineas[lineaAnteriorIndex];
-                        const rolMatch = lineaOriginal.match(/(\d+)\. (.*?)(<@!?\d+>)?/);
-                        if (participanteAnterior >= 35) {
+                        const regexUsuario = new RegExp(`<@${usuarioAAgregar.id}>`);
+                        const lineaOriginal = lineas[lineaAnteriorIndex].replace(regexUsuario, '').trim();
+                        const partesLinea = lineaOriginal.split('.');
+                        const rolParte = partesLinea.length > 1 ? partesLinea.slice(1).join('.').trim() : '';
+
+                        if (rolParte === '') {
                             lineas[lineaAnteriorIndex] = `${participanteAnterior}. X`;
-                        } else if (rolMatch && rolMatch[2]) {
-                            lineas[lineaAnteriorIndex] = `${participanteAnterior}. ${rolMatch[2].trim()}`;
                         } else {
-                            lineas[lineaAnteriorIndex] = `${participanteAnterior}.`;
+                            lineas[lineaAnteriorIndex] = `${participanteAnterior}. ${rolParte}`;
                         }
                     }
                 }
@@ -334,41 +334,62 @@ client.on(Events.InteractionCreate, async interaction => {
         }
     } else if (interaction.isStringSelectMenu()) {
         if (interaction.customId === 'select_compo') {
-            // === CORRECCIÓN ===
-            // Eliminar deferReply para poder usar showModal
-            // await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-            // === FIN DE LA CORRECCIÓN ===
-
             if (!db) {
-                // await interaction.editReply({ content: 'Error: ...' }); // Ya no se usa editReply
                 await interaction.reply({ content: 'Error: La base de datos no está disponible. Por favor, inténtalo de nuevo más tarde.', flags: [MessageFlags.Ephemeral] });
                 return;
             }
 
             try {
-                const composSnapshot = await getDocs(composCollectionRef);
-                const options = composSnapshot.docs.map(doc => ({
-                    label: doc.data().name,
-                    value: doc.id
-                }));
-
-                if (options.length === 0) {
-                    // await interaction.editReply('No hay compos de party guardadas. Usa el comando `/add_compo` para añadir una.');
-                    await interaction.reply({ content: 'No hay compos de party guardadas. Usa el comando `/add_compo` para añadir una.', flags: [MessageFlags.Ephemeral] });
+                let compoId;
+                if (interaction.values && interaction.values.length > 0) {
+                    compoId = interaction.values[0];
+                } else {
+                    await interaction.reply({ content: 'Hubo un error al seleccionar el template. Por favor, inténtalo de nuevo.', flags: [MessageFlags.Ephemeral] });
                     return;
                 }
 
-                const selectMenu = new StringSelectMenuBuilder()
-                    .setCustomId('select_compo')
-                    .setPlaceholder('Elige un template de party...')
-                    .addOptions(options);
+                const composSnapshot = await getDocs(composCollectionRef);
+                const selectedCompo = composSnapshot.docs.find(doc => doc.id === compoId);
+                if (!selectedCompo) {
+                        await interaction.reply({ content: 'Error: El template de party no fue encontrado.', flags: [MessageFlags.Ephemeral] });
+                        return;
+                }
+                const compoName = selectedCompo.data().name;
 
-                const row = new ActionRowBuilder().addComponents(selectMenu);
-                // await interaction.editReply({ content: 'Por favor, selecciona una compo para iniciar:', components: [row] });
-                await interaction.reply({ content: 'Por favor, selecciona una compo para iniciar:', components: [row], flags: [MessageFlags.Ephemeral] });
+                const modal = new ModalBuilder()
+                    .setCustomId(`start_comp_modal_${compoId}`)
+                    .setTitle(`Iniciar Party con: ${compoName}`);
+
+                const horaMasseoInput = new TextInputBuilder()
+                    .setCustomId('hora_masseo')
+                    .setLabel("Hora del masseo?")
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+                    .setPlaceholder('Ej: 22:00 UTC');
+
+                const tiempoFinalizacionInput = new TextInputBuilder()
+                    .setCustomId('tiempo_finalizacion')
+                    .setLabel("En cuánto tiempo finalizan las inscripciones?")
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+                    .setPlaceholder('Ej: 2h 30m');
+
+                const mensajeEncabezadoInput = new TextInputBuilder()
+                    .setCustomId('mensaje_encabezado')
+                    .setLabel("Mensaje de encabezado?")
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setRequired(false)
+                    .setPlaceholder('Ej: DESDE HOY 1+2+3+4 SET...');
+
+                modal.addComponents(
+                    new ActionRowBuilder().addComponents(horaMasseoInput),
+                    new ActionRowBuilder().addComponents(tiempoFinalizacionInput),
+                    new ActionRowBuilder().addComponents(mensajeEncabezadoInput)
+                );
+                
+                await interaction.showModal(modal);
             } catch (error) {
                 console.error('Error al obtener las compos:', error);
-                // await interaction.editReply('Hubo un error al cargar los templates de party.');
                 await interaction.reply({ content: 'Hubo un error al cargar los templates de party.', flags: [MessageFlags.Ephemeral] });
             }
         }
@@ -481,10 +502,12 @@ ${compoContent}`;
 
 // Evento: Reacciones en el canal para desapuntarse
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
+    // Si la reacción es del bot, la ignoramos.
     if (user.bot) {
         return;
     }
     
+    // Obtiene el mensaje completo, si no está en caché
     if (reaction.partial) {
         try {
             await reaction.fetch();
@@ -496,6 +519,7 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
 
     const message = reaction.message;
 
+    // Verificamos si la reacción está en el mensaje principal de un hilo de party.
     if (!message.channel.isThread()) {
         await reaction.users.remove(user.id).catch(() => {});
         return;
@@ -507,24 +531,26 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
         return;
     }
 
+    // Si la reacción no es la de desapuntar (❌), la eliminamos y no hacemos nada más.
     if (reaction.emoji.name !== '❌') {
         await reaction.users.remove(user.id).catch(() => {});
         return;
     }
 
+    // A partir de aquí, se ejecuta la lógica de desapuntar solo si es la reacción ❌
     try {
         let lineas = mensajePrincipal.content.split('\n');
 
         let oldSpotIndex = -1;
-        const regexUsuario = new RegExp(`<@!?${user.id}>`);
         for (const [index, linea] of lineas.entries()) {
-            if (regexUsuario.test(linea)) {
+            if (linea.includes(`<@${user.id}>`)) {
                 oldSpotIndex = index;
                 break;
             }
         }
         
         if (oldSpotIndex === -1) {
+            // El usuario que reacciona no está en la lista. Se elimina su reacción y no se hace nada más.
             await reaction.users.remove(user.id).catch(() => {});
             return;
         }
@@ -532,24 +558,30 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
         const oldLine = lineas[oldSpotIndex];
         const oldSpot = parseInt(oldLine.trim().split('.')[0]);
 
-        const rolMatch = oldLine.match(/(\d+)\. (.*?)(<@!?\d+>)?/);
+        // Regex para capturar el rol (texto entre el número y la mención del usuario)
+        const regexRol = new RegExp(`^${oldSpot}\\.(.*?)(<@${user.id}>)`);
+        const match = oldLine.match(regexRol);
 
-        if (oldSpot >= 35) {
-            lineas[oldSpotIndex] = `${oldSpot}. X`;
-        } else if (rolMatch && rolMatch[2]) {
-            lineas[oldSpotIndex] = `${oldSpot}. ${rolMatch[2].trim()}`;
+        if (match && match[1].trim() !== '') {
+            // Si hay un rol definido, lo restauramos sin el usuario
+            lineas[oldSpotIndex] = `${oldSpot}.${match[1].trim()}`;
         } else {
-             lineas[oldSpotIndex] = `${oldSpot}.`;
+            // Si el rol no estaba definido o era "X", lo dejamos sin usuario
+            // Esto también maneja el caso de que la línea no tenía un rol explícito
+            const regexClean = new RegExp(`(<@${user.id}>)`);
+            lineas[oldSpotIndex] = oldLine.replace(regexClean, '').trim();
         }
-        
+
         await mensajePrincipal.edit(lineas.join('\n'));
-        await reaction.users.remove(user.id).catch(() => {});
+        await reaction.users.remove(user.id).catch(() => {}); // Quita la reacción del usuario
         
         const mensajeConfirmacion = await message.channel.send(`✅ <@${user.id}> se ha desapuntado del puesto **${oldSpot}**.`);
         setTimeout(() => mensajeConfirmacion.delete().catch(() => {}), 10000);
 
     } catch (error) {
         console.error('Error procesando reacción:', error);
+        // Intentar eliminar la reacción incluso si hubo un error para no dejar el canal sucio.
+        await reaction.users.remove(user.id).catch(() => {});
     }
 });
 
@@ -568,7 +600,7 @@ client.on(Events.MessageCreate, async message => {
     }
 
     try {
-        await message.delete().catch(() => {});
+        await message.delete();
 
         const mensajePrincipal = await channel.fetchStarterMessage();
         if (!mensajePrincipal) {
@@ -578,9 +610,9 @@ client.on(Events.MessageCreate, async message => {
         let lineas = mensajePrincipal.content.split('\n');
         
         let oldSpotIndex = -1;
-        const regexUsuario = new RegExp(`<@!?${author.id}>`);
         for (const [index, linea] of lineas.entries()) {
-            if (regexUsuario.test(linea)) {
+            const regex = new RegExp(`<@${author.id}>`);
+            if (regex.test(linea)) {
                 oldSpotIndex = index;
                 break;
             }
@@ -590,14 +622,18 @@ client.on(Events.MessageCreate, async message => {
             const oldLine = lineas[oldSpotIndex];
             const oldSpot = parseInt(oldLine.trim().split('.')[0]);
             
-            const rolMatch = oldLine.match(/(\d+)\. (.*?)(<@!?\d+>)?/);
+            const regexUser = new RegExp(`<@${author.id}>`);
+            const remainingContent = oldLine.replace(regexUser, '').trim();
 
             if (oldSpot >= 35) {
                 lineas[oldSpotIndex] = `${oldSpot}. X`;
-            } else if (rolMatch && rolMatch[2]) {
-                lineas[oldSpotIndex] = `${oldSpot}. ${rolMatch[2].trim()}`;
             } else {
-                lineas[oldSpotIndex] = `${oldSpot}.`;
+                const rolMatch = remainingContent.match(/(\d+\.\s*)(.*)/);
+                if (rolMatch) {
+                    lineas[oldSpotIndex] = `${rolMatch[1]}${rolMatch[2]}`;
+                } else {
+                    lineas[oldSpotIndex] = `${oldSpot}.`;
+                }
             }
         }
     
