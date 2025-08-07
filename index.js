@@ -205,9 +205,9 @@ client.on(Events.InteractionCreate, async interaction => {
                 const usuarioARemover = interaction.options.getUser('usuario');
                 let lineas = mensajePrincipal.content.split('\n');
 
-                const regexUsuario = new RegExp(`<@${usuarioARemover.id}>`);
                 let lineaEncontrada = -1;
                 for (let i = 0; i < lineas.length; i++) {
+                    const regexUsuario = new RegExp(`<@!?${usuarioARemover.id}>`);
                     if (regexUsuario.test(lineas[i])) {
                         lineaEncontrada = i;
                         break;
@@ -221,7 +221,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 const numeroPuesto = parseInt(lineas[lineaEncontrada].trim().split('.')[0]);
                 
-                const lineaOriginal = lineas[lineaEncontrada].replace(regexUsuario, '').trim();
+                const lineaOriginal = lineas[lineaEncontrada].replace(new RegExp(`<@!?${usuarioARemover.id}>`), '').trim();
                 const partesLinea = lineaOriginal.split('.');
                 const rolParte = partesLinea.length > 1 ? partesLinea.slice(1).join('.').trim() : '';
 
@@ -267,7 +267,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 if (participanteAnterior) {
                     const lineaAnteriorIndex = lineas.findIndex(linea => linea.startsWith(`${participanteAnterior}.`));
                     if (lineaAnteriorIndex !== -1) {
-                        const regexUsuario = new RegExp(`<@${usuarioAAgregar.id}>`);
+                        const regexUsuario = new RegExp(`<@!?${usuarioAAgregar.id}>`);
                         const lineaOriginal = lineas[lineaAnteriorIndex].replace(regexUsuario, '').trim();
                         const partesLinea = lineaOriginal.split('.');
                         const rolParte = partesLinea.length > 1 ? partesLinea.slice(1).join('.').trim() : '';
@@ -502,12 +502,10 @@ ${compoContent}`;
 
 // Evento: Reacciones en el canal para desapuntarse
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
-    // Si la reacción es del bot, la ignoramos.
     if (user.bot) {
         return;
     }
     
-    // Obtiene el mensaje completo, si no está en caché
     if (reaction.partial) {
         try {
             await reaction.fetch();
@@ -519,7 +517,6 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
 
     const message = reaction.message;
 
-    // Verificamos si la reacción está en el mensaje principal de un hilo de party.
     if (!message.channel.isThread()) {
         await reaction.users.remove(user.id).catch(() => {});
         return;
@@ -531,39 +528,37 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
         return;
     }
 
-    // Si la reacción no es la de desapuntar (❌), la eliminamos y no hacemos nada más.
     if (reaction.emoji.name !== '❌') {
         await reaction.users.remove(user.id).catch(() => {});
         return;
     }
 
-    // A partir de aquí, se ejecuta la lógica de desapuntar solo si es la reacción ❌
     try {
         let lineas = mensajePrincipal.content.split('\n');
-        const participantes = parsearParticipantes(lineas);
+
+        let oldSpotIndex = -1;
+        // CORRECCIÓN CLAVE: Buscamos el ID del usuario en cada línea de forma más fiable
+        const regexUsuario = new RegExp(`<@!?${user.id}>`);
+        for (const [index, linea] of lineas.entries()) {
+            if (regexUsuario.test(linea)) {
+                oldSpotIndex = index;
+                break;
+            }
+        }
         
-        const oldSpot = participantes.get(user.id);
-        if (!oldSpot) {
-            // El usuario que reacciona no está en la lista. Se elimina su reacción y no se hace nada más.
+        if (oldSpotIndex === -1) {
             await reaction.users.remove(user.id).catch(() => {});
             return;
         }
 
-        const oldSpotIndex = lineas.findIndex(linea => linea.startsWith(`${oldSpot}.`));
-        if (oldSpotIndex === -1) {
-             await reaction.users.remove(user.id).catch(() => {});
-             return;
-        }
-
         const oldLine = lineas[oldSpotIndex];
-        const regexUser = new RegExp(`<@!?${user.id}>`);
-        const remainingContent = oldLine.replace(regexUser, '').trim();
+        const oldSpot = parseInt(oldLine.trim().split('.')[0]);
 
-        // Si el puesto es uno de los que originalmente tenían 'X'
+        const remainingContent = oldLine.replace(regexUsuario, '').trim();
+
         if (oldSpot >= 35) {
             lineas[oldSpotIndex] = `${oldSpot}. X`;
         } else {
-            // Si el puesto tenía un rol, lo deja sin el nombre del usuario
             const rolMatch = remainingContent.match(/(\d+\.\s*)(.*)/);
             if (rolMatch) {
                 lineas[oldSpotIndex] = `${rolMatch[1]}${rolMatch[2]}`;
@@ -573,7 +568,7 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
         }
 
         await mensajePrincipal.edit(lineas.join('\n'));
-        await reaction.users.remove(user.id).catch(() => {}); // Quita la reacción del usuario
+        await reaction.users.remove(user.id).catch(() => {});
         
         const mensajeConfirmacion = await message.channel.send(`✅ <@${user.id}> se ha desapuntado del puesto **${oldSpot}**.`);
         setTimeout(() => mensajeConfirmacion.delete().catch(() => {}), 10000);
@@ -606,20 +601,21 @@ client.on(Events.MessageCreate, async message => {
         }
 
         let lineas = mensajePrincipal.content.split('\n');
-        const participantes = parsearParticipantes(lineas);
         
-        const oldSpot = participantes.get(author.id);
-
-        if (oldSpot) {
-            const oldSpotIndex = lineas.findIndex(linea => linea.startsWith(`${oldSpot}.`));
-            if (oldSpotIndex === -1) {
-                // No se encontró el puesto anterior, salimos.
-                return;
+        let oldSpotIndex = -1;
+        const regexUsuario = new RegExp(`<@!?${author.id}>`);
+        for (const [index, linea] of lineas.entries()) {
+            if (regexUsuario.test(linea)) {
+                oldSpotIndex = index;
+                break;
             }
-            
+        }
+
+        if (oldSpotIndex !== -1) {
             const oldLine = lineas[oldSpotIndex];
-            const regexUser = new RegExp(`<@!?${author.id}>`);
-            const remainingContent = oldLine.replace(regexUser, '').trim();
+            const oldSpot = parseInt(oldLine.trim().split('.')[0]);
+            
+            const remainingContent = oldLine.replace(regexUsuario, '').trim();
 
             if (oldSpot >= 35) {
                 lineas[oldSpotIndex] = `${oldSpot}. X`;
