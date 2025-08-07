@@ -11,7 +11,7 @@ const { getFirestore, collection, addDoc, getDocs, doc, setDoc } = require('fire
 // Importar Express para el servidor web de Render
 const express = require('express');
 const app = express();
-const port = process.env.env || 3000;
+const port = process.env.PORT || 3000;
 
 // Configuración del cliente de Discord.js
 const client = new Client({
@@ -33,7 +33,6 @@ app.listen(port, () => {
 });
 
 // --- Lógica Principal del Bot de Discord ---
-const hilosMonitoreados = {};
 let db;
 let composCollectionRef;
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
@@ -110,6 +109,20 @@ client.on('ready', async () => {
     }
 });
 
+// Función para parsear el mensaje y extraer los participantes
+function parsearParticipantes(lineas) {
+    const participantes = new Map();
+    for (const linea of lineas) {
+        const match = linea.match(/(\d+)\.(.*?)<@(\d+)>/);
+        if (match) {
+            const numeroPuesto = parseInt(match[1]);
+            const userId = match[3];
+            participantes.set(userId, numeroPuesto);
+        }
+    }
+    return participantes;
+}
+
 // Evento: Interacción de comandos y modals
 client.on(Events.InteractionCreate, async interaction => {
     if (interaction.isChatInputCommand()) {
@@ -172,54 +185,56 @@ client.on(Events.InteractionCreate, async interaction => {
 
             await interaction.showModal(modal);
         } else if (commandName === 'remove_user_compo') {
-            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+            try {
+                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
-            if (!interaction.channel.isThread()) {
-                await interaction.editReply('Este comando solo se puede usar dentro de un hilo de party.');
-                return;
-            }
-            
-            const hilo = interaction.channel;
-            const hiloInfo = hilosMonitoreados[hilo.id];
-            if (!hiloInfo) {
-                await interaction.editReply('Este hilo no está monitoreado. Por favor, usa este comando en un hilo de party creado por el bot.');
-                return;
-            }
-
-            const usuarioARemover = interaction.options.getUser('usuario');
-            const mensajePrincipal = await hilo.fetchStarterMessage();
-
-            if (!mensajePrincipal) {
-                await interaction.editReply('No se pudo encontrar el mensaje principal de la party.');
-                return;
-            }
-
-            const participante = hiloInfo.participantes.get(usuarioARemover.id);
-
-            if (!participante) {
-                await interaction.editReply(`El usuario <@${usuarioARemover.id}> no se encuentra en la lista de la party.`);
-                return;
-            }
-            
-            let lineas = mensajePrincipal.content.split('\n');
-            const spot = typeof participante === 'object' ? participante.spot : participante;
-            const originalContent = typeof participante === 'object' ? participante.originalContent : null;
-
-            const lineaIndex = lineas.findIndex(linea => linea.startsWith(`${spot}.`));
-            
-            if (lineaIndex !== -1) {
-                if (originalContent) {
-                    lineas[lineaIndex] = originalContent;
-                } else {
-                    lineas[lineaIndex] = lineas[lineaIndex].includes('. X') ? `${spot}. X` : lineas[lineaIndex].split(`<@${usuarioARemover.id}>`)[0].trim();
+                if (!interaction.channel.isThread()) {
+                    await interaction.editReply('Este comando solo se puede usar dentro de un hilo de party.');
+                    return;
                 }
-                hiloInfo.participantes.delete(usuarioARemover.id);
+                
+                const hilo = interaction.channel;
+                const mensajePrincipal = await hilo.fetchStarterMessage();
+
+                if (!mensajePrincipal) {
+                    await interaction.editReply('No se pudo encontrar el mensaje principal de la party.');
+                    return;
+                }
+
+                const usuarioARemover = interaction.options.getUser('usuario');
+                let lineas = mensajePrincipal.content.split('\n');
+
+                const regexUsuario = new RegExp(`<@${usuarioARemover.id}>`);
+                let lineaEncontrada = -1;
+                for (let i = 0; i < lineas.length; i++) {
+                    if (regexUsuario.test(lineas[i])) {
+                        lineaEncontrada = i;
+                        break;
+                    }
+                }
+
+                if (lineaEncontrada === -1) {
+                    await interaction.editReply(`El usuario <@${usuarioARemover.id}> no se encuentra en la lista de la party.`);
+                    return;
+                }
+
+                const numeroPuesto = parseInt(lineas[lineaEncontrada].trim().split('.')[0]);
+                
+                if (lineas[lineaEncontrada].includes('. X')) {
+                    lineas[lineaEncontrada] = `${numeroPuesto}. X`;
+                } else {
+                    lineas[lineaEncontrada] = lineas[lineaEncontrada].split(`<@${usuarioARemover.id}>`)[0].trim();
+                }
+
+                await mensajePrincipal.edit(lineas.join('\n'));
+                await interaction.editReply(`✅ Usuario <@${usuarioARemover.id}> eliminado del puesto **${numeroPuesto}**.`);
+
+            } catch (error) {
+                console.error('Error en remove_user_compo:', error);
+                if (!interaction.replied) {
+                    await interaction.editReply({ content: 'Hubo un error interno. Por favor, inténtalo de nuevo.', flags: [MessageFlags.Ephemeral] });
+                }
             }
-
-            await mensajePrincipal.edit(lineas.join('\n'));
-
-            await interaction.editReply(`✅ Usuario <@${usuarioARemover.id}> eliminado del puesto **${spot}**.`);
-            
         } else if (commandName === 'add_user_compo') {
             try {
                 await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
@@ -230,12 +245,6 @@ client.on(Events.InteractionCreate, async interaction => {
                 }
                 
                 const hilo = interaction.channel;
-                const hiloInfo = hilosMonitoreados[hilo.id];
-                if (!hiloInfo) {
-                    await interaction.editReply('Este hilo no está siendo monitoreado por el bot. Por favor, usa este comando en un hilo de party creado recientemente.');
-                    return;
-                }
-
                 const usuarioAAgregar = interaction.options.getUser('usuario');
                 const puestoAAgregar = interaction.options.getInteger('puesto');
                 const mensajePrincipal = await hilo.fetchStarterMessage();
@@ -246,20 +255,18 @@ client.on(Events.InteractionCreate, async interaction => {
                 }
                 
                 let lineas = mensajePrincipal.content.split('\n');
-                const participanteAnterior = hiloInfo.participantes.get(usuarioAAgregar.id);
+                const participantes = parsearParticipantes(lineas);
+
+                const participanteAnterior = participantes.get(usuarioAAgregar.id);
                 
                 if (participanteAnterior) {
-                    const oldSpot = typeof participanteAnterior === 'object' ? participanteAnterior.spot : participanteAnterior;
-                    const originalContent = typeof participanteAnterior === 'object' ? participanteAnterior.originalContent : null;
-                    
-                    const lineaAnteriorIndex = lineas.findIndex(linea => linea.startsWith(`${oldSpot}.`));
+                    const lineaAnteriorIndex = lineas.findIndex(linea => linea.startsWith(`${participanteAnterior}.`));
                     if (lineaAnteriorIndex !== -1) {
-                        if (originalContent) {
-                            lineas[lineaAnteriorIndex] = originalContent;
+                        if (lineas[lineaAnteriorIndex].includes('. X')) {
+                            lineas[lineaAnteriorIndex] = `${participanteAnterior}. X`;
                         } else {
-                            lineas[lineaAnteriorIndex] = lineas[lineaAnteriorIndex].includes('. X') ? `${oldSpot}. X` : lineas[lineaAnteriorIndex].split(`<@${usuarioAAgregar.id}>`)[0].trim();
+                            lineas[lineaAnteriorIndex] = lineas[lineaAnteriorIndex].split(`<@${usuarioAAgregar.id}>`)[0].trim();
                         }
-                        hiloInfo.participantes.delete(usuarioAAgregar.id);
                     }
                 }
 
@@ -291,7 +298,6 @@ client.on(Events.InteractionCreate, async interaction => {
                         const nuevoValor = `${puestoAAgregar}. ${rol} <@${usuarioAAgregar.id}>`;
                         lineas[lineaNuevaIndex] = nuevoValor;
                         await mensajePrincipal.edit(lineas.join('\n'));
-                        hiloInfo.participantes.set(usuarioAAgregar.id, { spot: puestoAAgregar, originalContent: lineaOriginal });
                         await interaction.editReply(`✅ Usuario <@${usuarioAAgregar.id}> añadido al puesto **${puestoAAgregar}** como **${rol}**.`);
                         
                         colector.stop();
@@ -306,7 +312,6 @@ client.on(Events.InteractionCreate, async interaction => {
                     const nuevoValor = `${lineaOriginal} <@${usuarioAAgregar.id}>`;
                     lineas[lineaNuevaIndex] = nuevoValor;
                     await mensajePrincipal.edit(lineas.join('\n'));
-                    hiloInfo.participantes.set(usuarioAAgregar.id, { spot: puestoAAgregar, originalContent: lineaOriginal });
                     
                     await interaction.editReply(`✅ Usuario <@${usuarioAAgregar.id}> añadido al puesto **${puestoAAgregar}**.`);
                 }
@@ -412,8 +417,8 @@ client.on(Events.InteractionCreate, async interaction => {
             }
 
             try {
-                const compoSnapshot = await getDocs(composCollectionRef);
-                const selectedCompo = compoSnapshot.docs.find(doc => doc.id === compoId);
+                const composSnapshot = await getDocs(composCollectionRef);
+                const selectedCompo = composSnapshot.docs.find(doc => doc.id === compoId);
                 if (!selectedCompo) {
                     await interaction.editReply('Error: El template de party no fue encontrado.');
                     return;
@@ -454,11 +459,9 @@ ${compoContent}`;
                     autoArchiveDuration: 60,
                 });
 
-                hilosMonitoreados[hilo.id] = {
-                    mensajeId: mensajeInicial.id,
-                    participantes: new Map()
-                };
-
+                // No se necesita el objeto hilosMonitoreados
+                // Ya no gestionamos el estado de manera global
+                
                 await hilo.send("¡Escribe un número para apuntarte!");
 
                 if (totalMilisegundos > 0) {
@@ -471,8 +474,6 @@ ${compoContent}`;
                                 await canalHilo.setLocked(true);
                                 await canalHilo.send('¡Las inscripciones han terminado! Este hilo ha sido bloqueado y ya no se pueden añadir más participantes.');
                             }
-                            
-                            delete hilosMonitoreados[hilo.id];
                         } catch (error) {
                             console.error(`Error al bloquear el hilo ${hilo.id}:`, error);
                         }
@@ -490,12 +491,11 @@ ${compoContent}`;
 });
 
 client.on(Events.MessageCreate, async message => {
-    if (message.author.bot || !message.channel.isThread() || !hilosMonitoreados[message.channel.id]) {
+    if (message.author.bot || !message.channel.isThread()) {
         return;
     }
     
     const { channel, author, content } = message;
-    const hiloInfo = hilosMonitoreados[channel.id];
     const numero = parseInt(content.trim());
     
     if (isNaN(numero) || numero < 1 || numero > 50) {
@@ -504,23 +504,39 @@ client.on(Events.MessageCreate, async message => {
 
     try {
         await message.delete();
-        const canalPrincipal = await channel.parent.fetch();
-        const mensajeAEditar = await canalPrincipal.messages.fetch(hiloInfo.mensajeId);
-        let lineas = mensajeAEditar.content.split('\n');
-        const oldSpot = hiloInfo.participantes.get(author.id);
-    
-        if (oldSpot) {
-            const oldSpotNumber = typeof oldSpot === 'object' ? oldSpot.spot : oldSpot;
-            const originalContent = typeof oldSpot === 'object' ? oldSpot.originalContent : null;
-            
-            const lineaAnterior = lineas.findIndex(linea => linea.startsWith(`${oldSpotNumber}.`));
-            if (lineaAnterior !== -1) {
-                if (originalContent) {
-                    lineas[lineaAnterior] = originalContent;
-                } else {
-                    lineas[lineaAnterior] = lineas[lineaAnterior].includes('. X') ? `${oldSpotNumber}. X` : lineas[lineaAnterior].split(`<@${author.id}>`)[0].trim();
+
+        // Obtiene el mensaje principal del hilo para trabajar con él
+        const mensajePrincipal = await channel.fetchStarterMessage();
+        if (!mensajePrincipal) {
+            return;
+        }
+
+        let lineas = mensajePrincipal.content.split('\n');
+        
+        // CORRECCIÓN: Parseamos la lista de participantes en cada interacción para no depender del estado global
+        const participantes = new Map();
+        let oldSpot = null;
+        let oldOriginalContent = null;
+        for (const [index, linea] of lineas.entries()) {
+            const regex = new RegExp(`<@${author.id}>`);
+            if (regex.test(linea)) {
+                const match = linea.match(/^(\d+)\./);
+                if (match) {
+                    oldSpot = parseInt(match[1]);
+                    oldOriginalContent = linea.replace(regex, '').trim();
+                    if(oldOriginalContent.endsWith('.')) {
+                        oldOriginalContent = oldOriginalContent.slice(0, -1);
+                    }
+                    if (oldOriginalContent.endsWith('X')) {
+                        oldOriginalContent = `${oldSpot}. X`;
+                    } else if (oldOriginalContent.trim() !== '') {
+                        oldOriginalContent = `${oldSpot}. ${oldOriginalContent}`;
+                    } else {
+                         oldOriginalContent = `${oldSpot}.`;
+                    }
+                    
+                    lineas[index] = oldOriginalContent;
                 }
-                hiloInfo.participantes.delete(author.id);
             }
         }
     
@@ -547,8 +563,7 @@ client.on(Events.MessageCreate, async message => {
                     const rol = m.content;
                     const nuevoValor = `${numero}. ${rol} <@${author.id}>`;
                     lineas[indiceLinea] = nuevoValor;
-                    await mensajeAEditar.edit(lineas.join('\n'));
-                    hiloInfo.participantes.set(author.id, { spot: numero, originalContent: lineaOriginal });
+                    await mensajePrincipal.edit(lineas.join('\n'));
                     await channel.send(`<@${author.id}>, te has apuntado en el puesto **${numero}** como **${rol}**.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
                 });
     
@@ -561,7 +576,6 @@ client.on(Events.MessageCreate, async message => {
                 const nuevoValor = `${lineaOriginal} <@${author.id}>`;
                 lineas[indiceLinea] = nuevoValor;
                 await mensajeAEditar.edit(lineas.join('\n'));
-                hiloInfo.participantes.set(author.id, { spot: numero, originalContent: lineaOriginal });
                 await channel.send(`<@${author.id}>, te has apuntado en el puesto **${numero}** con éxito.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
             }
         }
