@@ -476,10 +476,11 @@ ${compoContent}`;
 
                 if (totalMilisegundos > 0) {
                     await hilo.send(`El hilo se bloqueará automáticamente en **${tiempoFinalizacionStr}**.`);
-
+                    
+                    // === INICIO DE LA CORRECCIÓN ===
                     setTimeout(async () => {
                         try {
-                            const canalHilo = client.channels.cache.get(hilo.id);
+                            const canalHilo = await client.channels.fetch(hilo.id); // Usamos fetch() para una búsqueda más robusta
                             if (canalHilo && !canalHilo.archived) {
                                 await canalHilo.setLocked(true);
                                 await canalHilo.send('¡Las inscripciones han terminado! Este hilo ha sido bloqueado y ya no se pueden añadir más participantes.');
@@ -488,6 +489,7 @@ ${compoContent}`;
                             console.error(`Error al bloquear el hilo ${hilo.id}:`, error);
                         }
                     }, totalMilisegundos);
+                    // === FIN DE LA CORRECCIÓN ===
                 }
 
                 await interaction.editReply({ content: `✅ La party se ha iniciado correctamente. Puedes verla en <#${hilo.id}>.`, flags: [MessageFlags.Ephemeral] });
