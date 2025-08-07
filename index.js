@@ -477,10 +477,9 @@ ${compoContent}`;
                 if (totalMilisegundos > 0) {
                     await hilo.send(`El hilo se bloqueará automáticamente en **${tiempoFinalizacionStr}**.`);
                     
-                    // === INICIO DE LA CORRECCIÓN ===
                     setTimeout(async () => {
                         try {
-                            const canalHilo = await client.channels.fetch(hilo.id); // Usamos fetch() para una búsqueda más robusta
+                            const canalHilo = await client.channels.fetch(hilo.id);
                             if (canalHilo && !canalHilo.archived) {
                                 await canalHilo.setLocked(true);
                                 await canalHilo.send('¡Las inscripciones han terminado! Este hilo ha sido bloqueado y ya no se pueden añadir más participantes.');
@@ -489,7 +488,6 @@ ${compoContent}`;
                             console.error(`Error al bloquear el hilo ${hilo.id}:`, error);
                         }
                     }, totalMilisegundos);
-                    // === FIN DE LA CORRECCIÓN ===
                 }
 
                 await interaction.editReply({ content: `✅ La party se ha iniciado correctamente. Puedes verla en <#${hilo.id}>.`, flags: [MessageFlags.Ephemeral] });
@@ -504,8 +502,8 @@ ${compoContent}`;
 
 // Evento: Reacciones en el canal para desapuntarse
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
-    // Si la reacción no es del usuario, es la del bot o no es el emoji ❌, lo ignoramos.
-    if (user.bot || reaction.emoji.name !== '❌') {
+    // Si la reacción es del bot, la ignoramos.
+    if (user.bot) {
         return;
     }
     
@@ -521,7 +519,7 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
 
     const message = reaction.message;
 
-    // Solo procesamos reacciones en el mensaje principal de un hilo de party
+    // Verificamos si la reacción está en el mensaje principal de un hilo de party.
     if (!message.channel.isThread()) {
         await reaction.users.remove(user.id).catch(() => {});
         return;
@@ -533,6 +531,13 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
         return;
     }
 
+    // Si la reacción no es la de desapuntar (❌), la eliminamos y no hacemos nada más.
+    if (reaction.emoji.name !== '❌') {
+        await reaction.users.remove(user.id).catch(() => {});
+        return;
+    }
+
+    // A partir de aquí, se ejecuta la lógica de desapuntar solo si es la reacción ❌
     try {
         let lineas = mensajePrincipal.content.split('\n');
 
@@ -545,7 +550,7 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
         }
         
         if (oldSpotIndex === -1) {
-            // CORRECCIÓN CLAVE: El usuario que reacciona no está en la lista. Se elimina su reacción y no se hace nada más.
+            // El usuario que reacciona no está en la lista. Se elimina su reacción y no se hace nada más.
             await reaction.users.remove(user.id).catch(() => {});
             return;
         }
@@ -553,7 +558,6 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
         const oldLine = lineas[oldSpotIndex];
         const oldSpot = parseInt(oldLine.trim().split('.')[0]);
 
-        // Lógica de desapuntado (igual que en el comando)
         const regexUser = new RegExp(`<@${user.id}>`);
         const remainingContent = oldLine.replace(regexUser, '').trim();
 
