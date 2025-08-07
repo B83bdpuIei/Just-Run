@@ -11,7 +11,7 @@ const { getFirestore, collection, addDoc, getDocs, doc, setDoc } = require('fire
 // Importar Express para el servidor web de Render
 const express = require('express');
 const app = express();
-const port = process.env.PORT || 3000;
+const port = process.env.env || 3000;
 
 // Configuración del cliente de Discord.js
 const client = new Client({
@@ -325,8 +325,20 @@ client.on(Events.InteractionCreate, async interaction => {
             }
 
             try {
+                let compoId;
+                if (interaction.values && interaction.values.length > 0) {
+                    compoId = interaction.values[0];
+                } else {
+                    await interaction.reply({ content: 'Hubo un error al seleccionar el template. Por favor, inténtalo de nuevo.', flags: [MessageFlags.Ephemeral] });
+                    return;
+                }
+
                 const composSnapshot = await getDocs(composCollectionRef);
                 const selectedCompo = composSnapshot.docs.find(doc => doc.id === compoId);
+                if (!selectedCompo) {
+                     await interaction.reply({ content: 'Error: El template de party no fue encontrado.', flags: [MessageFlags.Ephemeral] });
+                     return;
+                }
                 const compoName = selectedCompo.data().name;
 
                 const modal = new ModalBuilder()
