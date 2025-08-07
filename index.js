@@ -3,10 +3,11 @@ const {
     Client, GatewayIntentBits, Partials, Events,
     ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder,
     SlashCommandBuilder, PermissionFlagsBits, MessageFlags, StringSelectMenuBuilder,
-    StringSelectMenuInteraction, InteractionType, ButtonBuilder, ButtonStyle
+    StringSelectMenuInteraction, InteractionType, ButtonBuilder, ButtonStyle,
+    codeBlock
 } = require('discord.js');
 const { initializeApp } = require('firebase/app');
-const { getFirestore, collection, addDoc, getDocs, doc, setDoc } = require('firebase/firestore');
+const { getFirestore, collection, addDoc, getDocs, doc, setDoc, deleteDoc } = require('firebase/firestore');
 
 // Importar Express para el servidor web de Render
 const express = require('express');
@@ -97,6 +98,10 @@ client.on('ready', async () => {
                 option.setName('puesto')
                     .setDescription('El número del puesto (1-50).')
                     .setRequired(true))
+            .setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads),
+        new SlashCommandBuilder()
+            .setName('delete_comp')
+            .setDescription('Elimina un template de party guardado.')
             .setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads),
     ];
 
@@ -329,12 +334,41 @@ client.on(Events.InteractionCreate, async interaction => {
                     await interaction.editReply({ content: 'Hubo un error interno. Por favor, inténtalo de nuevo.', flags: [MessageFlags.Ephemeral] });
                 }
             }
+        } else if (commandName === 'delete_comp') {
+            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
+            if (!db) {
+                await interaction.editReply('Error: La base de datos no está disponible. Por favor, inténtalo de nuevo más tarde.');
+                return;
+            }
+
+            try {
+                const composSnapshot = await getDocs(composCollectionRef);
+                const options = composSnapshot.docs.map(doc => ({
+                    label: doc.data().name,
+                    value: doc.id
+                }));
+
+                if (options.length === 0) {
+                    await interaction.editReply('No hay compos de party guardadas para eliminar.');
+                    return;
+                }
+
+                const selectMenu = new StringSelectMenuBuilder()
+                    .setCustomId('delete_compo_select')
+                    .setPlaceholder('Elige un template de party para eliminar...')
+                    .addOptions(options);
+                
+                const row = new ActionRowBuilder().addComponents(selectMenu);
+                await interaction.editReply({ content: 'Por favor, selecciona la compo que deseas eliminar:', components: [row] });
+
+            } catch (error) {
+                console.error('Error al obtener compos para eliminar:', error);
+                await interaction.editReply('Hubo un error al cargar los templates de party para eliminar.');
+            }
         }
     } else if (interaction.isStringSelectMenu()) {
         if (interaction.customId === 'select_compo') {
-            // CORREGIDO: Eliminamos el deferReply porque el modal es la respuesta final.
-            // await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-
             if (!db) {
                 await interaction.reply({ content: 'Error: La base de datos no está disponible. Por favor, inténtalo de nuevo más tarde.', flags: [MessageFlags.Ephemeral] });
                 return;
@@ -391,10 +425,26 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.showModal(modal);
             } catch (error) {
                 console.error('Error al obtener las compos:', error);
-                // CORREGIDO: Reemplazamos editReply por reply
                 if (!interaction.replied) {
                     await interaction.reply({ content: 'Hubo un error al cargar los templates de party.', flags: [MessageFlags.Ephemeral] });
                 }
+            }
+        } else if (interaction.customId === 'delete_compo_select') {
+            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
+            if (!db) {
+                await interaction.editReply('Error: La base de datos no está disponible. Por favor, inténtalo de nuevo más tarde.');
+                return;
+            }
+
+            const compoId = interaction.values[0];
+
+            try {
+                await deleteDoc(doc(db, `artifacts/${appId}/public/data/compos`, compoId));
+                await interaction.editReply(`✅ El template de party se ha eliminado correctamente.`);
+            } catch (error) {
+                console.error('Error al eliminar el template de party:', error);
+                await interaction.editReply('Hubo un error al eliminar el template. Por favor, inténtalo de nuevo.');
             }
         }
     } else if (interaction.isButton()) {
@@ -548,6 +598,8 @@ ${compoContent}`;
                             if (canalHilo && !canalHilo.archived) {
                                 await canalHilo.setLocked(true);
                                 await canalHilo.send('¡Las inscripciones han terminado! Este hilo ha sido bloqueado y ya no se pueden añadir más participantes.');
+                            } else {
+                                console.log(`El hilo ${hilo.id} ya no existe o está archivado. No se puede bloquear.`);
                             }
                         } catch (error) {
                             console.error(`Error al bloquear el hilo ${hilo.id}:`, error);
@@ -561,82 +613,6 @@ ${compoContent}`;
                 console.error('Error al crear la party o el hilo:', error);
                 await interaction.editReply({ content: 'Hubo un error al intentar crear la party. Por favor, asegúrate de que el bot tenga los permisos necesarios.', flags: [MessageFlags.Ephemeral] });
             }
-        }
-    } else if (interaction.isButton()) {
-        if (interaction.customId === 'desapuntarme_button') {
-            await interaction.deferReply({ ephemeral: true });
-
-            const message = interaction.message;
-            const user = interaction.user;
-
-            if (!message.channel.isThread()) {
-                await interaction.editReply('Este botón solo funciona en un hilo de party.');
-                return;
-            }
-
-            const mensajePrincipal = await message.channel.fetchStarterMessage();
-            if (!mensajePrincipal) {
-                await interaction.editReply('No se pudo encontrar el mensaje principal de la party. Inténtalo de nuevo.');
-                return;
-            }
-            
-            try {
-                let lineas = mensajePrincipal.content.split('\n');
-                let oldSpotIndex = -1;
-
-                for (const [index, linea] of lineas.entries()) {
-                    if (linea.includes(`<@${user.id}>`)) {
-                        oldSpotIndex = index;
-                        break;
-                    }
-                }
-                
-                if (oldSpotIndex === -1) {
-                    await interaction.editReply('No estás apuntado en esta party.');
-                    return;
-                }
-
-                const oldLine = lineas[oldSpotIndex];
-                const oldSpot = parseInt(oldLine.trim().split('.')[0]);
-                const regexRol = new RegExp(`^${oldSpot}\\.(.*?)(<@${user.id}>)`);
-                const match = oldLine.match(regexRol);
-
-                if (match && match[1].trim() !== '') {
-                    lineas[oldSpotIndex] = `${oldSpot}.${match[1].trim()}`;
-                } else {
-                    const regexClean = new RegExp(`(<@${user.id}>)`);
-                    lineas[oldSpotIndex] = oldLine.replace(regexClean, '').trim();
-                }
-
-                await mensajePrincipal.edit({ content: lineas.join('\n') });
-                
-                await interaction.editReply(`✅ Te has desapuntado del puesto **${oldSpot}**.`);
-            } catch (error) {
-                console.error('Error procesando el botón de desapuntar:', error);
-                await interaction.editReply('Hubo un error al intentar desapuntarte. Por favor, inténtalo de nuevo.');
-            }
-        }
-    } else if (interaction.type === InteractionType.ModalSubmit) {
-        if (interaction.customId === 'add_compo_modal') {
-            const compoName = interaction.fields.getTextInputValue('compo_name');
-            const compoContent = interaction.fields.getTextInputValue('compo_content');
-            
-            if (!db) {
-                await interaction.reply({ content: 'Error: La base de datos no está disponible.', flags: [MessageFlags.Ephemeral] });
-                return;
-            }
-
-            try {
-                await addDoc(composCollectionRef, {
-                    name: compoName,
-                    content: compoContent
-                });
-                await interaction.reply({ content: `✅ El template de party **${compoName}** ha sido guardado.`, flags: [MessageFlags.Ephemeral] });
-            } catch (error) {
-                console.error('Error al guardar el template de party:', error);
-                await interaction.reply({ content: 'Hubo un error al guardar el template.', flags: [MessageFlags.Ephemeral] });
-            }
-            return;
         }
     }
 });
