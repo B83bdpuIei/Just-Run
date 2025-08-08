@@ -481,8 +481,6 @@ client.on(Events.InteractionCreate, async interaction => {
                     await interaction.editReply('Hubo un error al eliminar el template. Por favor, inténtalo de nuevo.');
                 }
             } else if (interaction.customId.startsWith('edit_comp_select_')) {
-                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-
                 const mensajePrincipalId = interaction.customId.split('_')[3];
                 const campoAEditar = interaction.values[0];
 
