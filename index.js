@@ -594,7 +594,8 @@ ${compoContent}`;
                     setTimeout(async () => {
                         try {
                             const canalHilo = await client.channels.fetch(hilo.id);
-                            if (canalHilo && !canalHilo.archived && !canalHilo.isLockedThread()) { // CORRECCIÓN: Verifica si ya está bloqueado
+                            // CORRECCIÓN: Usamos channel.locked en lugar de isLockedThread
+                            if (canalHilo && !canalHilo.archived && !canalHilo.locked) {
                                 await canalHilo.setLocked(true);
                                 await canalHilo.send('¡Las inscripciones han terminado! Este hilo ha sido bloqueado y ya no se pueden añadir más participantes.');
                             } else {
@@ -625,8 +626,8 @@ client.on(Events.MessageCreate, async message => {
     const { channel, author, content } = message;
     const numero = parseInt(content.trim());
     
-    // --- CORRECCIÓN: Si el hilo está bloqueado, no se permiten inscripciones ---
-    if (channel.isLockedThread()) {
+    // --- CORRECCIÓN: Si el hilo está bloqueado, no se permiten inscripciones por número ---
+    if (channel.locked) {
         if (content.trim().toLowerCase() !== 'desapuntar' && !isNaN(numero)) {
             await message.delete().catch(() => {});
             const mensajeError = await channel.send(`❌ <@${author.id}>, las inscripciones han finalizado. Este hilo está bloqueado.`);
@@ -634,7 +635,7 @@ client.on(Events.MessageCreate, async message => {
             return;
         }
     }
-
+    
     // Verificamos si el mensaje es para desapuntarse
     if (content.trim().toLowerCase() === 'desapuntar') {
         const mensajePrincipal = await channel.fetchStarterMessage().catch(() => null);
