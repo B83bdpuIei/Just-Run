@@ -151,6 +151,40 @@ function rebuildMessage(originalContent, newContent, fieldToEdit) {
     return finalMessage.trim();
 }
 
+// --- NUEVA FUNCIÓN PARA ELIMINAR USUARIOS DE LA LISTA DE FORMA ROBUSTA ---
+function removeUserFromList(lineas, userId) {
+    let oldSpotIndex = -1;
+    const userRegex = new RegExp(`<@${userId}>`);
+
+    for (const [index, linea] of lineas.entries()) {
+        if (userRegex.test(linea)) {
+            oldSpotIndex = index;
+            break;
+        }
+    }
+
+    if (oldSpotIndex === -1) {
+        return { success: false, updatedLines: lineas, oldSpot: null };
+    }
+
+    const oldLine = lineas[oldSpotIndex];
+    const oldSpot = parseInt(oldLine.trim().split('.')[0]);
+
+    // Obtener la parte de la línea sin el usuario
+    const remainingContent = oldLine.replace(userRegex, '').trim();
+
+    // Verificamos si el puesto era un puesto vacío 'X'
+    if (remainingContent.endsWith('. X') || remainingContent.endsWith('.X')) {
+        lineas[oldSpotIndex] = `${oldSpot}. X`;
+    } else {
+        // Restaurar a la línea original sin la mención del usuario
+        lineas[oldSpotIndex] = remainingContent;
+    }
+
+    return { success: true, updatedLines: lineas, oldSpot: oldSpot };
+}
+
+
 // Evento: Interacción de comandos, modales y botones
 client.on(Events.InteractionCreate, async interaction => {
     if (interaction.isChatInputCommand()) {
@@ -237,34 +271,15 @@ client.on(Events.InteractionCreate, async interaction => {
                 const usuarioARemover = interaction.options.getUser('usuario');
                 let lineas = mensajePrincipal.content.split('\n');
 
-                const regexUsuario = new RegExp(`<@${usuarioARemover.id}>`);
-                let lineaEncontrada = -1;
-                for (let i = 0; i < lineas.length; i++) {
-                    if (regexUsuario.test(lineas[i])) {
-                        lineaEncontrada = i;
-                        break;
-                    }
-                }
+                const resultado = removeUserFromList(lineas, usuarioARemover.id);
 
-                if (lineaEncontrada === -1) {
+                if (!resultado.success) {
                     await interaction.editReply(`El usuario <@${usuarioARemover.id}> no se encuentra en la lista de la party.`);
                     return;
                 }
 
-                const numeroPuesto = parseInt(lineas[lineaEncontrada].trim().split('.')[0]);
-                
-                const lineaOriginal = lineas[lineaEncontrada].replace(regexUsuario, '').trim();
-                const partesLinea = lineaOriginal.split('.');
-                const rolParte = partesLinea.length > 1 ? partesLinea.slice(1).join('.').trim() : '';
-
-                if (rolParte === '') {
-                    lineas[lineaEncontrada] = `${numeroPuesto}. X`;
-                } else {
-                    lineas[lineaEncontrada] = `${numeroPuesto}. ${rolParte}`;
-                }
-
-                await mensajePrincipal.edit(lineas.join('\n'));
-                await interaction.editReply(`✅ Usuario <@${usuarioARemover.id}> eliminado del puesto **${numeroPuesto}**.`);
+                await mensajePrincipal.edit(resultado.updatedLines.join('\n'));
+                await interaction.editReply(`✅ Usuario <@${usuarioARemover.id}> eliminado del puesto **${resultado.oldSpot}**.`);
 
             } catch (error) {
                 console.error('Error en remove_user_compo:', error);
@@ -299,15 +314,9 @@ client.on(Events.InteractionCreate, async interaction => {
                 if (participanteAnterior) {
                     const lineaAnteriorIndex = lineas.findIndex(linea => linea.startsWith(`${participanteAnterior}.`));
                     if (lineaAnteriorIndex !== -1) {
-                        const regexUsuario = new RegExp(`<@${usuarioAAgregar.id}>`);
-                        const lineaOriginal = lineas[lineaAnteriorIndex].replace(regexUsuario, '').trim();
-                        const partesLinea = lineaOriginal.split('.');
-                        const rolParte = partesLinea.length > 1 ? partesLinea.slice(1).join('.').trim() : '';
-
-                        if (rolParte === '') {
-                            lineas[lineaAnteriorIndex] = `${participanteAnterior}. X`;
-                        } else {
-                            lineas[lineaAnteriorIndex] = `${participanteAnterior}. ${rolParte}`;
+                        const resultado = removeUserFromList(lineas, usuarioAAgregar.id);
+                        if (resultado.success) {
+                           lineas = resultado.updatedLines;
                         }
                     }
                 }
@@ -396,7 +405,6 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.editReply('Hubo un error al cargar los templates de party para eliminar.');
             }
         } else if (commandName === 'edit_comp') {
-            // --- CORRECCIÓN: Deferir la respuesta inmediatamente ---
             await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
             if (!interaction.channel.isThread()) {
@@ -574,35 +582,16 @@ client.on(Events.InteractionCreate, async interaction => {
             
             try {
                 let lineas = mensajePrincipal.content.split('\n');
-                let oldSpotIndex = -1;
+                const resultado = removeUserFromList(lineas, user.id);
 
-                for (const [index, linea] of lineas.entries()) {
-                    if (linea.includes(`<@${user.id}>`)) {
-                        oldSpotIndex = index;
-                        break;
-                    }
-                }
-                
-                if (oldSpotIndex === -1) {
+                if (!resultado.success) {
                     await interaction.editReply('No estás apuntado en esta party.');
                     return;
                 }
 
-                const oldLine = lineas[oldSpotIndex];
-                const oldSpot = parseInt(oldLine.trim().split('.')[0]);
-                const regexRol = new RegExp(`^${oldSpot}\\.(.*?)(<@${user.id}>)`);
-                const match = oldLine.match(regexRol);
-
-                if (match && match[1].trim() !== '') {
-                    lineas[oldSpotIndex] = `${oldSpot}.${match[1].trim()}`;
-                } else {
-                    const regexClean = new RegExp(`(<@${user.id}>)`);
-                    lineas[oldSpotIndex] = oldLine.replace(regexClean, '').trim();
-                }
-
-                await mensajePrincipal.edit({ content: lineas.join('\n') });
+                await mensajePrincipal.edit({ content: resultado.updatedLines.join('\n') });
                 
-                await interaction.editReply(`✅ Te has desapuntado del puesto **${oldSpot}**.`);
+                await interaction.editReply(`✅ Te has desapuntado del puesto **${resultado.oldSpot}**.`);
             } catch (error) {
                 console.error('Error procesando el botón de desapuntar:', error);
                 await interaction.editReply('Hubo un error al intentar desapuntarte. Por favor, inténtalo de nuevo.');
@@ -776,38 +765,19 @@ client.on(Events.MessageCreate, async message => {
 
         try {
             let lineas = mensajePrincipal.content.split('\n');
-            let oldSpotIndex = -1;
+            const resultado = removeUserFromList(lineas, author.id);
 
-            for (const [index, linea] of lineas.entries()) {
-                if (linea.includes(`<@${author.id}>`)) {
-                    oldSpotIndex = index;
-                    break;
-                }
-            }
-            
-            if (oldSpotIndex === -1) {
+            if (!resultado.success) {
                 await message.delete().catch(() => {});
                 const mensajeError = await channel.send(`❌ <@${author.id}>, no estás apuntado en esta party.`);
                 setTimeout(() => mensajeError.delete().catch(() => {}), 10000);
                 return;
             }
 
-            const oldLine = lineas[oldSpotIndex];
-            const oldSpot = parseInt(oldLine.trim().split('.')[0]);
-            const regexRol = new RegExp(`^${oldSpot}\\.(.*?)(<@${author.id}>)`);
-            const match = oldLine.match(regexRol);
-
-            if (match && match[1].trim() !== '') {
-                lineas[oldSpotIndex] = `${oldSpot}.${match[1].trim()}`;
-            } else {
-                const regexClean = new RegExp(`(<@${author.id}>)`);
-                lineas[oldSpotIndex] = oldLine.replace(regexClean, '').trim();
-            }
-
-            await mensajePrincipal.edit({ content: lineas.join('\n') });
+            await mensajePrincipal.edit({ content: resultado.updatedLines.join('\n') });
             await message.delete().catch(() => {});
 
-            const mensajeConfirmacion = await channel.send(`✅ <@${author.id}>, te has desapuntado del puesto **${oldSpot}**.`);
+            const mensajeConfirmacion = await channel.send(`✅ <@${author.id}>, te has desapuntado del puesto **${resultado.oldSpot}**.`);
             setTimeout(() => mensajeConfirmacion.delete().catch(() => {}), 10000);
             return;
         } catch (error) {
@@ -848,15 +818,10 @@ client.on(Events.MessageCreate, async message => {
             const regexUser = new RegExp(`<@${author.id}>`);
             const remainingContent = oldLine.replace(regexUser, '').trim();
 
-            if (oldSpot >= 35) {
+            if (remainingContent.endsWith('. X') || remainingContent.endsWith('.X')) {
                 lineas[oldSpotIndex] = `${oldSpot}. X`;
             } else {
-                const rolMatch = remainingContent.match(/(\d+\.\s*)(.*)/);
-                if (rolMatch) {
-                    lineas[oldSpotIndex] = `${rolMatch[1]}${rolMatch[2]}`;
-                } else {
-                    lineas[oldSpotIndex] = `${oldSpot}.`;
-                }
+                lineas[oldSpotIndex] = remainingContent;
             }
         }
     
