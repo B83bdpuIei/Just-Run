@@ -176,13 +176,13 @@ function removeUserFromList(lineas, userId) {
     // Comprobar si la línea antes de la mención del usuario es solo un número y un punto, o si es un 'X'
     const roleMatch = remainingContent.match(/^\d+\.\s*(.*?)$/);
     const rolePart = roleMatch ? roleMatch[1].trim() : '';
-    
+
     if (rolePart === '' || rolePart.toUpperCase() === 'X') {
         // Restaurar a 'X' si no había rol o si el rol era 'X'
         lineas[oldSpotIndex] = `${oldSpot}. X`;
     } else {
         // Restaurar al rol original
-        lineas[oldSpotIndex] = `${oldSpot}. ${rolePart}`;
+        lineas[oldSpotIndex] = remainingContent;
     }
 
     return { success: true, updatedLines: lineas, oldSpot: oldSpot };
@@ -758,7 +758,11 @@ client.on(Events.MessageCreate, async message => {
     
     if (channel.locked) {
         if (content.trim().toLowerCase() !== 'desapuntar' && !isNaN(numero)) {
-            await message.delete().catch(() => {});
+            try {
+                await message.delete();
+            } catch (e) {
+                console.error('Error al intentar borrar el mensaje:', e);
+            }
             const mensajeError = await channel.send(`❌ <@${author.id}>, las inscripciones han finalizado. Este hilo está bloqueado.`);
             setTimeout(() => mensajeError.delete().catch(() => {}), 10000);
             return;
@@ -768,7 +772,11 @@ client.on(Events.MessageCreate, async message => {
     if (content.trim().toLowerCase() === 'desapuntar') {
         const mensajePrincipal = await channel.fetchStarterMessage().catch(() => null);
         if (!mensajePrincipal) {
-            await message.delete().catch(() => {});
+            try {
+                await message.delete();
+            } catch (e) {
+                console.error('Error al intentar borrar el mensaje:', e);
+            }
             await channel.send('Lo sentimos, no hemos podido cargar el primer mensaje de este hilo. Por favor, intenta crear una nueva party.').then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
             return;
         }
@@ -778,21 +786,33 @@ client.on(Events.MessageCreate, async message => {
             const resultado = removeUserFromList(lineas, author.id);
 
             if (!resultado.success) {
-                await message.delete().catch(() => {});
+                try {
+                    await message.delete();
+                } catch (e) {
+                    console.error('Error al intentar borrar el mensaje:', e);
+                }
                 const mensajeError = await channel.send(`❌ <@${author.id}>, no estás apuntado en esta party.`);
                 setTimeout(() => mensajeError.delete().catch(() => {}), 10000);
                 return;
             }
 
             await mensajePrincipal.edit({ content: resultado.updatedLines.join('\n') });
-            await message.delete().catch(() => {});
+            try {
+                await message.delete();
+            } catch (e) {
+                console.error('Error al intentar borrar el mensaje:', e);
+            }
 
             const mensajeConfirmacion = await channel.send(`✅ <@${author.id}>, te has desapuntado del puesto **${resultado.oldSpot}**.`);
             setTimeout(() => mensajeConfirmacion.delete().catch(() => {}), 10000);
             return;
         } catch (error) {
             console.error('Error procesando mensaje para desapuntar:', error);
-            await message.delete().catch(() => {});
+            try {
+                await message.delete();
+            } catch (e) {
+                console.error('Error al intentar borrar el mensaje:', e);
+            }
             channel.send(`Hubo un error al procesar tu solicitud, <@${author.id}>. Por favor, inténtalo de nuevo.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
             return;
         }
@@ -803,7 +823,11 @@ client.on(Events.MessageCreate, async message => {
     }
 
     try {
-        await message.delete();
+        try {
+            await message.delete();
+        } catch (e) {
+            console.error('Error al intentar borrar el mensaje:', e);
+        }
 
         const mensajePrincipal = await channel.fetchStarterMessage();
         if (!mensajePrincipal) {
@@ -812,7 +836,7 @@ client.on(Events.MessageCreate, async message => {
 
         let lineas = mensajePrincipal.content.split('\n');
         
-        // --- CORRECCIÓN: Usamos la función mejorada para desapuntar si ya estaba en la lista ---
+        // CORRECCIÓN: Usamos la función mejorada para desapuntar si ya estaba en la lista
         const resultadoEliminacion = removeUserFromList(lineas, author.id);
         if (resultadoEliminacion.success) {
             lineas = resultadoEliminacion.updatedLines;
