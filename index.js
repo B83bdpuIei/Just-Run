@@ -173,15 +173,11 @@ function removeUserFromList(lineas, userId) {
     // Encontrar la parte de la línea sin el usuario
     const remainingContent = oldLine.replace(userRegex, '').trim();
 
-    // Comprobar si la línea antes de la mención del usuario es solo un número y un punto, o si es un 'X'
-    const roleMatch = remainingContent.match(/^\d+\.\s*(.*?)$/);
-    const rolePart = roleMatch ? roleMatch[1].trim() : '';
-
-    if (rolePart === '' || rolePart.toUpperCase() === 'X') {
-        // Restaurar a 'X' si no había rol o si el rol era 'X'
+    // Comprobar si la línea antes de la mención del usuario era un 'X'
+    if (remainingContent.endsWith('. X') || remainingContent.endsWith('.X')) {
         lineas[oldSpotIndex] = `${oldSpot}. X`;
     } else {
-        // Restaurar al rol original
+        // Restaurar al rol original o a la línea completa
         lineas[oldSpotIndex] = remainingContent;
     }
 
@@ -409,20 +405,27 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.editReply('Hubo un error al cargar los templates de party para eliminar.');
             }
         } else if (commandName === 'edit_comp') {
-            // CORRECCIÓN: Usamos un try-catch para manejar el error de interacción
             try {
                 await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
             } catch (e) {
                 console.error('Error al deferir la respuesta del comando edit-comp:', e);
-                return; // Detiene la ejecución si no se puede deferir.
+                return;
             }
 
             if (!interaction.channel.isThread()) {
                 await interaction.editReply('Este comando solo se puede usar dentro de un hilo de party.');
                 return;
             }
+            
+            // CORRECCIÓN: Manejamos el error si no se encuentra el mensaje principal
+            let mensajePrincipal;
+            try {
+                mensajePrincipal = await interaction.channel.fetchStarterMessage();
+            } catch (e) {
+                await interaction.editReply('Hubo un error al intentar encontrar el mensaje principal. Es posible que haya sido eliminado.');
+                return;
+            }
 
-            const mensajePrincipal = await interaction.channel.fetchStarterMessage();
             if (!mensajePrincipal) {
                 await interaction.editReply('No se pudo encontrar el mensaje principal de la party.');
                 return;
