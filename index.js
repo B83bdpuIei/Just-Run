@@ -551,8 +551,7 @@ client.on(Events.InteractionCreate, async interaction => {
                         await interaction.editReply('No estás apuntado en esta party.');
                         return;
                     }
-
-                    // --- LÓGICA DE CORRECCIÓN PARA EL BOTÓN DESAPUNTAR ---
+                    
                     const originalContent = originalCompoContent.get(mensajePrincipal.id);
                     if (!originalContent) {
                         await interaction.editReply('Error: No se pudo encontrar la plantilla original para restaurar el puesto.');
@@ -560,19 +559,11 @@ client.on(Events.InteractionCreate, async interaction => {
                     }
 
                     const originalLines = originalContent.split('\n');
-                    const inicioPartyIndex = lineas.findIndex(linea => linea.startsWith('1.'));
-                    if (inicioPartyIndex === -1) {
-                        await interaction.editReply('Error: No se pudo encontrar el inicio de la lista de party.');
-                        return;
-                    }
-
-                    const offset = oldSpotIndex - inicioPartyIndex;
-                    const originalLineForSpot = originalLines[offset];
+                    const originalLineForSpot = originalLines.find(linea => linea.startsWith(`${oldSpot}.`));
                     
                     if (originalLineForSpot) {
                         lineas[oldSpotIndex] = originalLineForSpot;
                     } else {
-                        // Fallback por si acaso, aunque no debería ocurrir con la lógica anterior
                         const regexClean = new RegExp(`(<@${user.id}>)`);
                         lineas[oldSpotIndex] = lineas[oldSpotIndex].replace(regexClean, '').trim();
                     }
@@ -788,7 +779,6 @@ client.on(Events.MessageCreate, async message => {
                 return;
             }
             
-            // --- LÓGICA DE CORRECCIÓN PARA EL MENSAJE 'desapuntar' ---
             const originalContent = originalCompoContent.get(mensajePrincipal.id);
             if (!originalContent) {
                 await message.delete().catch(() => {});
@@ -798,16 +788,7 @@ client.on(Events.MessageCreate, async message => {
             }
 
             const originalLines = originalContent.split('\n');
-            const inicioPartyIndex = lineas.findIndex(linea => linea.startsWith('1.'));
-            if (inicioPartyIndex === -1) {
-                await message.delete().catch(() => {});
-                const mensajeError = await channel.send('Error: No se pudo encontrar el inicio de la lista de party.');
-                setTimeout(() => mensajeError.delete().catch(() => {}), 10000);
-                return;
-            }
-
-            const offset = oldSpotIndex - inicioPartyIndex;
-            const originalLineForSpot = originalLines[offset];
+            const originalLineForSpot = originalLines.find(linea => linea.startsWith(`${oldSpot}.`));
 
             if (originalLineForSpot) {
                 lineas[oldSpotIndex] = originalLineForSpot;
@@ -862,13 +843,7 @@ client.on(Events.MessageCreate, async message => {
                 const originalLines = originalContent.split('\n');
                 const originalLineForSpot = originalLines.find(linea => linea.startsWith(`${oldSpot}.`));
                 if (originalLineForSpot) {
-                    const inicioPartyIndex = lineas.findIndex(linea => linea.startsWith('1.'));
-                    if (inicioPartyIndex !== -1) {
-                        const offset = oldSpotIndex - inicioPartyIndex;
-                        lineas[oldSpotIndex] = originalLines[offset];
-                    } else {
-                        lineas[oldSpotIndex] = originalLineForSpot;
-                    }
+                    lineas[oldSpotIndex] = originalLineForSpot;
                 }
             } else {
                 const regexUser = new RegExp(`<@${author.id}>`);
