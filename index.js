@@ -124,6 +124,33 @@ function parsearParticipantes(lineas) {
     return participantes;
 }
 
+// Función para reconstruir el mensaje de la party
+function rebuildMessage(originalContent, newContent, fieldToEdit) {
+    const lines = originalContent.split('\n');
+    const hora = lines[0];
+    const inscripcionesIndex = lines.findIndex(line => line.startsWith('**INSCRIPCIONES TERMINAN:**'));
+    const inscripcionesLine = lines[inscripcionesIndex];
+    const compoContentStart = inscripcionesIndex + 2;
+
+    const encabezado = lines.slice(1, inscripcionesIndex).join('\n').trim();
+    const compoContent = lines.slice(compoContentStart).join('\n');
+
+    let newHora = hora;
+    let newEncabezado = encabezado;
+    let newCompoContent = compoContent;
+
+    if (fieldToEdit === 'hora') {
+        newHora = newContent;
+    } else if (fieldToEdit === 'encabezado') {
+        newEncabezado = newContent;
+    } else if (fieldToEdit === 'compo') {
+        newCompoContent = newContent;
+    }
+
+    let finalMessage = `${newHora}\n${newEncabezado ? newEncabezado + '\n\n' : '\n'}${inscripcionesLine}\n\n${newCompoContent}`;
+    return finalMessage.trim();
+}
+
 // Evento: Interacción de comandos, modales y botones
 client.on(Events.InteractionCreate, async interaction => {
     if (interaction.isChatInputCommand()) {
@@ -369,7 +396,6 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.editReply('Hubo un error al cargar los templates de party para eliminar.');
             }
         } else if (commandName === 'edit_comp') {
-            // Manejador del comando /edit-comp
             if (!interaction.channel.isThread()) {
                 await interaction.reply({ content: 'Este comando solo se puede usar dentro de un hilo de party.', flags: [MessageFlags.Ephemeral] });
                 return;
@@ -387,6 +413,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 .addOptions([
                     { label: 'Hora del Masse o evento', value: 'hora' },
                     { label: 'Mensaje de Encabezado', value: 'encabezado' },
+                    { label: 'Plantilla de la Party', value: 'compo' }
                 ]);
 
             const row = new ActionRowBuilder().addComponents(selectMenu);
@@ -475,34 +502,53 @@ client.on(Events.InteractionCreate, async interaction => {
             const mensajePrincipalId = interaction.customId.split('_')[3];
             const campoAEditar = interaction.values[0];
 
+            const mensajePrincipal = await interaction.channel.messages.fetch(mensajePrincipalId);
+            const valorActual = mensajePrincipal.content;
+
             const modal = new ModalBuilder()
                 .setCustomId(`edit_comp_modal_${mensajePrincipalId}_${campoAEditar}`)
                 .setTitle(`Editar ${campoAEditar}`);
 
-            const valorActual = interaction.message.content;
-            let valorInput;
+            let valorExtraido;
+            let textInputBuilder;
+            let textInputStyle = TextInputStyle.Short;
 
             if (campoAEditar === 'hora') {
-                const matchHora = valorActual.match(/^(.*?)\n/);
-                const valor = matchHora ? matchHora[1] : '';
-                valorInput = new TextInputBuilder()
+                valorExtraido = valorActual.split('\n')[0];
+                textInputBuilder = new TextInputBuilder()
                     .setCustomId('nuevo_valor')
                     .setLabel('Nueva hora del masseo')
-                    .setStyle(TextInputStyle.Short)
+                    .setStyle(textInputStyle)
                     .setRequired(true)
-                    .setValue(valor);
+                    .setValue(valorExtraido);
             } else if (campoAEditar === 'encabezado') {
-                const matchHeader = valorActual.match(/\n(.*?)\n\n/s);
-                const valor = matchHeader ? matchHeader[1] : '';
-                valorInput = new TextInputBuilder()
+                const lines = valorActual.split('\n');
+                const inscripcionesIndex = lines.findIndex(line => line.startsWith('**INSCRIPCIONES TERMINAN:**'));
+                valorExtraido = lines.slice(1, inscripcionesIndex).join('\n').trim();
+                textInputStyle = TextInputStyle.Paragraph;
+                textInputBuilder = new TextInputBuilder()
                     .setCustomId('nuevo_valor')
                     .setLabel('Nuevo mensaje de encabezado')
-                    .setStyle(TextInputStyle.Paragraph)
+                    .setStyle(textInputStyle)
                     .setRequired(false)
-                    .setValue(valor);
+                    .setValue(valorExtraido || " ");
+            } else if (campoAEditar === 'compo') {
+                const lines = valorActual.split('\n');
+                const inscripcionesIndex = lines.findIndex(line => line.startsWith('**INSCRIPCIONES TERMINAN:**'));
+                valorExtraido = lines.slice(inscripcionesIndex + 2).join('\n');
+                textInputStyle = TextInputStyle.Paragraph;
+                textInputBuilder = new TextInputBuilder()
+                    .setCustomId('nuevo_valor')
+                    .setLabel('Nueva plantilla de la party')
+                    .setStyle(textInputStyle)
+                    .setRequired(true)
+                    .setValue(valorExtraido);
+            } else {
+                await interaction.reply({ content: 'Campo de edición no válido.', ephemeral: true });
+                return;
             }
             
-            modal.addComponents(new ActionRowBuilder().addComponents(valorInput));
+            modal.addComponents(new ActionRowBuilder().addComponents(textInputBuilder));
             await interaction.showModal(modal);
         }
     } else if (interaction.isButton()) {
@@ -686,24 +732,11 @@ ${compoContent}`;
                     return;
                 }
                 
-                let lineas = mensajePrincipal.content.split('\n');
-                
-                if (campoAEditar === 'hora') {
-                    lineas[0] = nuevoValor;
-                } else if (campoAEditar === 'encabezado') {
-                    // Encontrar el final de la hora y el inicio de las inscripciones para reemplazar el encabezado
-                    const finalHoraIndex = 0;
-                    const inicioInscripcionesIndex = lineas.findIndex(linea => linea.startsWith('**INSCRIPCIONES TERMINAN:**'));
+                const originalContent = mensajePrincipal.content;
+                const nuevoMensaje = rebuildMessage(originalContent, nuevoValor, campoAEditar);
 
-                    if (inicioInscripcionesIndex > finalHoraIndex + 1) {
-                        lineas.splice(finalHoraIndex + 1, inicioInscripcionesIndex - (finalHoraIndex + 1), nuevoValor);
-                    } else if (nuevoValor) {
-                        lineas.splice(finalHoraIndex + 1, 0, nuevoValor);
-                    }
-                }
-                
-                await mensajePrincipal.edit(lineas.join('\n'));
-                await interaction.editReply(`✅ Se ha actualizado la **${campoAEditar}** del mensaje principal.`);
+                await mensajePrincipal.edit(nuevoMensaje);
+                await interaction.editReply(`✅ Se ha actualizado el campo **${campoAEditar}** del mensaje principal.`);
             } catch (error) {
                 console.error('Error al editar el mensaje de la compo:', error);
                 await interaction.editReply('Hubo un error al intentar editar el mensaje.');
