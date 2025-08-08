@@ -36,7 +36,6 @@ app.listen(port, () => {
 // --- Lógica Principal del Bot de Discord ---
 let db;
 let composCollectionRef;
-let partyMessagesCollectionRef; // Nueva colección para guardar el estado de las parties
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
 // === CONFIGURACIÓN DE FIRESTORE: AÑADE TU OBJETO AQUÍ ===
@@ -58,7 +57,6 @@ client.on('ready', async () => {
         const firebaseApp = initializeApp(firebaseConfig);
         db = getFirestore(firebaseApp);
         composCollectionRef = collection(db, `artifacts/${appId}/public/data/compos`);
-        partyMessagesCollectionRef = collection(db, `artifacts/${appId}/public/data/party_messages`);
         console.log('✅ Firestore inicializado con éxito.');
     } catch (error) {
         console.error('ERROR CRÍTICO: No se pudo inicializar Firestore. Las funcionalidades de base de datos no estarán disponibles.', error);
@@ -125,68 +123,6 @@ function parsearParticipantes(lineas) {
     }
     return participantes;
 }
-
-// Función para reconstruir el mensaje de la party
-function rebuildMessage(originalContent, newContent, fieldToEdit) {
-    const lines = originalContent.split('\n');
-    const hora = lines[0];
-    const inscripcionesIndex = lines.findIndex(line => line.startsWith('**INSCRIPCIONES TERMINAN:**'));
-    const inscripcionesLine = lines[inscripcionesIndex];
-    const compoContentStart = inscripcionesIndex + 2;
-
-    const encabezado = lines.slice(1, inscripcionesIndex).join('\n').trim();
-    const compoContent = lines.slice(compoContentStart).join('\n');
-
-    let newHora = hora;
-    let newEncabezado = encabezado;
-    let newCompoContent = compoContent;
-
-    if (fieldToEdit === 'hora') {
-        newHora = newContent;
-    } else if (fieldToEdit === 'encabezado') {
-        newEncabezado = newContent;
-    } else if (fieldToEdit === 'compo') {
-        newCompoContent = newContent;
-    }
-
-    let finalMessage = `${newHora}\n${newEncabezado ? newEncabezado + '\n\n' : '\n'}${inscripcionesLine}\n\n${newCompoContent}`;
-    return finalMessage.trim();
-}
-
-// Función mejorada para eliminar usuarios de la lista de forma robusta
-async function removeUserFromList(lineas, userId, originalCompoContent) {
-    let oldSpotIndex = -1;
-    const userRegex = new RegExp(`<@${userId}>`);
-
-    for (const [index, linea] of lineas.entries()) {
-        if (userRegex.test(linea)) {
-            oldSpotIndex = index;
-            break;
-        }
-    }
-
-    if (oldSpotIndex === -1) {
-        return { success: false, updatedLines: lineas, oldSpot: null };
-    }
-
-    const oldLine = lineas[oldSpotIndex];
-    const oldSpot = parseInt(oldLine.trim().split('.')[0]);
-
-    // Buscar la línea original en la plantilla guardada
-    const originalCompoLines = originalCompoContent.split('\n');
-    const originalLine = originalCompoLines.find(line => line.startsWith(`${oldSpot}.`));
-
-    // Si encontramos la línea original, la usamos para restaurar el puesto
-    if (originalLine) {
-        lineas[oldSpotIndex] = originalLine;
-    } else {
-        // Si no, asumimos que era un puesto dinámico (ej. con "X") y lo restauramos a ese estado
-        lineas[oldSpotIndex] = `${oldSpot}. X`;
-    }
-
-    return { success: true, updatedLines: lineas, oldSpot: oldSpot };
-}
-
 
 // Evento: Interacción de comandos, modales y botones
 client.on(Events.InteractionCreate, async interaction => {
@@ -271,28 +207,37 @@ client.on(Events.InteractionCreate, async interaction => {
                     return;
                 }
 
-                // Obtener la plantilla original de Firestore
-                const partyDoc = await doc(partyMessagesCollectionRef, mensajePrincipal.id);
-                const partySnapshot = await getDoc(partyDoc);
-                if (!partySnapshot.exists()) {
-                    await interaction.editReply('No se pudo encontrar la plantilla original de la party en la base de datos.');
-                    return;
-                }
-                const originalCompoContent = partySnapshot.data().original_compo_content;
-
-
                 const usuarioARemover = interaction.options.getUser('usuario');
                 let lineas = mensajePrincipal.content.split('\n');
 
-                const resultado = removeUserFromList(lineas, usuarioARemover.id, originalCompoContent);
+                const regexUsuario = new RegExp(`<@${usuarioARemover.id}>`);
+                let lineaEncontrada = -1;
+                for (let i = 0; i < lineas.length; i++) {
+                    if (regexUsuario.test(lineas[i])) {
+                        lineaEncontrada = i;
+                        break;
+                    }
+                }
 
-                if (!resultado.success) {
+                if (lineaEncontrada === -1) {
                     await interaction.editReply(`El usuario <@${usuarioARemover.id}> no se encuentra en la lista de la party.`);
                     return;
                 }
 
-                await mensajePrincipal.edit(resultado.updatedLines.join('\n'));
-                await interaction.editReply(`✅ Usuario <@${usuarioARemover.id}> eliminado del puesto **${resultado.oldSpot}**.`);
+                const numeroPuesto = parseInt(lineas[lineaEncontrada].trim().split('.')[0]);
+                
+                const lineaOriginal = lineas[lineaEncontrada].replace(regexUsuario, '').trim();
+                const partesLinea = lineaOriginal.split('.');
+                const rolParte = partesLinea.length > 1 ? partesLinea.slice(1).join('.').trim() : '';
+
+                if (rolParte === '') {
+                    lineas[lineaEncontrada] = `${numeroPuesto}. X`;
+                } else {
+                    lineas[lineaEncontrada] = `${numeroPuesto}. ${rolParte}`;
+                }
+
+                await mensajePrincipal.edit(lineas.join('\n'));
+                await interaction.editReply(`✅ Usuario <@${usuarioARemover.id}> eliminado del puesto **${numeroPuesto}**.`);
 
             } catch (error) {
                 console.error('Error en remove_user_compo:', error);
@@ -325,17 +270,18 @@ client.on(Events.InteractionCreate, async interaction => {
                 const participanteAnterior = participantes.get(usuarioAAgregar.id);
                 
                 if (participanteAnterior) {
-                    // Obtener la plantilla original de Firestore
-                    const partyDoc = doc(partyMessagesCollectionRef, mensajePrincipal.id);
-                    const partySnapshot = await getDoc(partyDoc);
-                    if (!partySnapshot.exists()) {
-                         await interaction.editReply('No se pudo encontrar la plantilla original de la party en la base de datos.');
-                         return;
-                    }
-                    const originalCompoContent = partySnapshot.data().original_compo_content;
-                    const resultado = await removeUserFromList(lineas, usuarioAAgregar.id, originalCompoContent);
-                    if (resultado.success) {
-                       lineas = resultado.updatedLines;
+                    const lineaAnteriorIndex = lineas.findIndex(linea => linea.startsWith(`${participanteAnterior}.`));
+                    if (lineaAnteriorIndex !== -1) {
+                        const regexUsuario = new RegExp(`<@${usuarioAAgregar.id}>`);
+                        const lineaOriginal = lineas[lineaAnteriorIndex].replace(regexUsuario, '').trim();
+                        const partesLinea = lineaOriginal.split('.');
+                        const rolParte = partesLinea.length > 1 ? partesLinea.slice(1).join('.').trim() : '';
+
+                        if (rolParte === '') {
+                            lineas[lineaAnteriorIndex] = `${participanteAnterior}. X`;
+                        } else {
+                            lineas[lineaAnteriorIndex] = `${participanteAnterior}. ${rolParte}`;
+                        }
                     }
                 }
 
@@ -423,28 +369,15 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.editReply('Hubo un error al cargar los templates de party para eliminar.');
             }
         } else if (commandName === 'edit_comp') {
-            try {
-                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-            } catch (e) {
-                console.error('Error al deferir la respuesta del comando edit-comp:', e);
-                return;
-            }
-
+            // Manejador del comando /edit-comp
             if (!interaction.channel.isThread()) {
-                await interaction.editReply('Este comando solo se puede usar dentro de un hilo de party.');
-                return;
-            }
-            
-            let mensajePrincipal;
-            try {
-                mensajePrincipal = await interaction.channel.fetchStarterMessage();
-            } catch (e) {
-                await interaction.editReply('Hubo un error al intentar encontrar el mensaje principal. Es posible que haya sido eliminado.');
+                await interaction.reply({ content: 'Este comando solo se puede usar dentro de un hilo de party.', flags: [MessageFlags.Ephemeral] });
                 return;
             }
 
+            const mensajePrincipal = await interaction.channel.fetchStarterMessage();
             if (!mensajePrincipal) {
-                await interaction.editReply('No se pudo encontrar el mensaje principal de la party.');
+                await interaction.reply({ content: 'No se pudo encontrar el mensaje principal de la party.', flags: [MessageFlags.Ephemeral] });
                 return;
             }
 
@@ -454,11 +387,10 @@ client.on(Events.InteractionCreate, async interaction => {
                 .addOptions([
                     { label: 'Hora del Masse o evento', value: 'hora' },
                     { label: 'Mensaje de Encabezado', value: 'encabezado' },
-                    { label: 'Plantilla de la Party', value: 'compo' }
                 ]);
 
             const row = new ActionRowBuilder().addComponents(selectMenu);
-            await interaction.editReply({ content: 'Selecciona lo que quieres editar:', components: [row] });
+            await interaction.reply({ content: 'Selecciona lo que quieres editar:', components: [row], flags: [MessageFlags.Ephemeral] });
         }
     } else if (interaction.isStringSelectMenu()) {
         if (interaction.customId === 'select_compo') {
@@ -543,60 +475,34 @@ client.on(Events.InteractionCreate, async interaction => {
             const mensajePrincipalId = interaction.customId.split('_')[3];
             const campoAEditar = interaction.values[0];
 
-            let mensajePrincipal;
-            try {
-                mensajePrincipal = await interaction.channel.messages.fetch(mensajePrincipalId);
-            } catch (e) {
-                await interaction.reply({ content: 'No se pudo encontrar el mensaje a editar. Es posible que haya sido eliminado.', ephemeral: true });
-                return;
-            }
-            
-            const valorActual = mensajePrincipal.content;
-
             const modal = new ModalBuilder()
                 .setCustomId(`edit_comp_modal_${mensajePrincipalId}_${campoAEditar}`)
                 .setTitle(`Editar ${campoAEditar}`);
 
-            let valorExtraido;
-            let textInputBuilder;
-            let textInputStyle = TextInputStyle.Short;
+            const valorActual = interaction.message.content;
+            let valorInput;
 
             if (campoAEditar === 'hora') {
-                valorExtraido = valorActual.split('\n')[0];
-                textInputBuilder = new TextInputBuilder()
+                const matchHora = valorActual.match(/^(.*?)\n/);
+                const valor = matchHora ? matchHora[1] : '';
+                valorInput = new TextInputBuilder()
                     .setCustomId('nuevo_valor')
                     .setLabel('Nueva hora del masseo')
-                    .setStyle(textInputStyle)
+                    .setStyle(TextInputStyle.Short)
                     .setRequired(true)
-                    .setValue(valorExtraido);
+                    .setValue(valor);
             } else if (campoAEditar === 'encabezado') {
-                const lines = valorActual.split('\n');
-                const inscripcionesIndex = lines.findIndex(line => line.startsWith('**INSCRIPCIONES TERMINAN:**'));
-                valorExtraido = lines.slice(1, inscripcionesIndex).join('\n').trim();
-                textInputStyle = TextInputStyle.Paragraph;
-                textInputBuilder = new TextInputBuilder()
+                const matchHeader = valorActual.match(/\n(.*?)\n\n/s);
+                const valor = matchHeader ? matchHeader[1] : '';
+                valorInput = new TextInputBuilder()
                     .setCustomId('nuevo_valor')
                     .setLabel('Nuevo mensaje de encabezado')
-                    .setStyle(textInputStyle)
+                    .setStyle(TextInputStyle.Paragraph)
                     .setRequired(false)
-                    .setValue(valorExtraido || " ");
-            } else if (campoAEditar === 'compo') {
-                const lines = valorActual.split('\n');
-                const inscripcionesIndex = lines.findIndex(line => line.startsWith('**INSCRIPCIONES TERMINAN:**'));
-                valorExtraido = lines.slice(inscripcionesIndex + 2).join('\n');
-                textInputStyle = TextInputStyle.Paragraph;
-                textInputBuilder = new TextInputBuilder()
-                    .setCustomId('nuevo_valor')
-                    .setLabel('Nueva plantilla de la party')
-                    .setStyle(textInputStyle)
-                    .setRequired(true)
-                    .setValue(valorExtraido);
-            } else {
-                await interaction.reply({ content: 'Campo de edición no válido.', ephemeral: true });
-                return;
+                    .setValue(valor);
             }
             
-            modal.addComponents(new ActionRowBuilder().addComponents(textInputBuilder));
+            modal.addComponents(new ActionRowBuilder().addComponents(valorInput));
             await interaction.showModal(modal);
         }
     } else if (interaction.isButton()) {
@@ -617,27 +523,37 @@ client.on(Events.InteractionCreate, async interaction => {
                 return;
             }
             
-            // Obtener la plantilla original de Firestore
-            const partyDoc = doc(db, partyMessagesCollectionRef.path, mensajePrincipal.id);
-            const partySnapshot = await getDoc(partyDoc);
-            if (!partySnapshot.exists()) {
-                await interaction.editReply('No se pudo encontrar la plantilla original de la party en la base de datos.');
-                return;
-            }
-            const originalCompoContent = partySnapshot.data().original_compo_content;
-            
             try {
                 let lineas = mensajePrincipal.content.split('\n');
-                const resultado = await removeUserFromList(lineas, user.id, originalCompoContent);
+                let oldSpotIndex = -1;
 
-                if (!resultado.success) {
+                for (const [index, linea] of lineas.entries()) {
+                    if (linea.includes(`<@${user.id}>`)) {
+                        oldSpotIndex = index;
+                        break;
+                    }
+                }
+                
+                if (oldSpotIndex === -1) {
                     await interaction.editReply('No estás apuntado en esta party.');
                     return;
                 }
 
-                await mensajePrincipal.edit({ content: resultado.updatedLines.join('\n') });
+                const oldLine = lineas[oldSpotIndex];
+                const oldSpot = parseInt(oldLine.trim().split('.')[0]);
+                const regexRol = new RegExp(`^${oldSpot}\\.(.*?)(<@${user.id}>)`);
+                const match = oldLine.match(regexRol);
+
+                if (match && match[1].trim() !== '') {
+                    lineas[oldSpotIndex] = `${oldSpot}.${match[1].trim()}`;
+                } else {
+                    const regexClean = new RegExp(`(<@${user.id}>)`);
+                    lineas[oldSpotIndex] = oldLine.replace(regexClean, '').trim();
+                }
+
+                await mensajePrincipal.edit({ content: lineas.join('\n') });
                 
-                await interaction.editReply(`✅ Te has desapuntado del puesto **${resultado.oldSpot}**.`);
+                await interaction.editReply(`✅ Te has desapuntado del puesto **${oldSpot}**.`);
             } catch (error) {
                 console.error('Error procesando el botón de desapuntar:', error);
                 await interaction.editReply('Hubo un error al intentar desapuntarte. Por favor, inténtalo de nuevo.');
@@ -727,11 +643,6 @@ ${compoContent}`;
                     name: "Inscripción de la party",
                     autoArchiveDuration: 60,
                 });
-
-                // GUARDAMOS LA PLANTILLA ORIGINAL EN LA BASE DE DATOS
-                await setDoc(doc(partyMessagesCollectionRef, mensajePrincipal.id), {
-                    original_compo_content: compoContent
-                });
                 
                 // En lugar de enviar el botón en el mensaje principal, lo enviamos en el hilo.
                 await hilo.send({ content: "¡Escribe un número para apuntarte!", components: [buttonRow] });
@@ -768,24 +679,31 @@ ${compoContent}`;
             const campoAEditar = partes[4];
             const nuevoValor = interaction.fields.getTextInputValue('nuevo_valor');
 
-            let mensajePrincipal;
             try {
-                mensajePrincipal = await interaction.channel.messages.fetch(mensajePrincipalId);
-            } catch (e) {
-                await interaction.editReply('No se pudo encontrar el mensaje a editar. Es posible que haya sido eliminado.');
-                return;
-            }
-            if (!mensajePrincipal) {
-                await interaction.editReply('No se pudo encontrar el mensaje a editar.');
-                return;
-            }
-            
-            try {
-                const originalContent = mensajePrincipal.content;
-                const nuevoMensaje = rebuildMessage(originalContent, nuevoValor, campoAEditar);
+                const mensajePrincipal = await interaction.channel.messages.fetch(mensajePrincipalId);
+                if (!mensajePrincipal) {
+                    await interaction.editReply('No se pudo encontrar el mensaje a editar.');
+                    return;
+                }
+                
+                let lineas = mensajePrincipal.content.split('\n');
+                
+                if (campoAEditar === 'hora') {
+                    lineas[0] = nuevoValor;
+                } else if (campoAEditar === 'encabezado') {
+                    // Encontrar el final de la hora y el inicio de las inscripciones para reemplazar el encabezado
+                    const finalHoraIndex = 0;
+                    const inicioInscripcionesIndex = lineas.findIndex(linea => linea.startsWith('**INSCRIPCIONES TERMINAN:**'));
 
-                await mensajePrincipal.edit(nuevoMensaje);
-                await interaction.editReply(`✅ Se ha actualizado el campo **${campoAEditar}** del mensaje principal.`);
+                    if (inicioInscripcionesIndex > finalHoraIndex + 1) {
+                        lineas.splice(finalHoraIndex + 1, inicioInscripcionesIndex - (finalHoraIndex + 1), nuevoValor);
+                    } else if (nuevoValor) {
+                        lineas.splice(finalHoraIndex + 1, 0, nuevoValor);
+                    }
+                }
+                
+                await mensajePrincipal.edit(lineas.join('\n'));
+                await interaction.editReply(`✅ Se ha actualizado la **${campoAEditar}** del mensaje principal.`);
             } catch (error) {
                 console.error('Error al editar el mensaje de la compo:', error);
                 await interaction.editReply('Hubo un error al intentar editar el mensaje.');
@@ -805,11 +723,7 @@ client.on(Events.MessageCreate, async message => {
     
     if (channel.locked) {
         if (content.trim().toLowerCase() !== 'desapuntar' && !isNaN(numero)) {
-            try {
-                await message.delete();
-            } catch (e) {
-                console.error('Error al intentar borrar el mensaje:', e);
-            }
+            await message.delete().catch(() => {});
             const mensajeError = await channel.send(`❌ <@${author.id}>, las inscripciones han finalizado. Este hilo está bloqueado.`);
             setTimeout(() => mensajeError.delete().catch(() => {}), 10000);
             return;
@@ -819,58 +733,50 @@ client.on(Events.MessageCreate, async message => {
     if (content.trim().toLowerCase() === 'desapuntar') {
         const mensajePrincipal = await channel.fetchStarterMessage().catch(() => null);
         if (!mensajePrincipal) {
-            try {
-                await message.delete();
-            } catch (e) {
-                console.error('Error al intentar borrar el mensaje:', e);
-            }
+            await message.delete().catch(() => {});
             await channel.send('Lo sentimos, no hemos podido cargar el primer mensaje de este hilo. Por favor, intenta crear una nueva party.').then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
             return;
         }
-        
-        // Obtener la plantilla original de Firestore
-        const partyDoc = doc(db, partyMessagesCollectionRef.path, mensajePrincipal.id);
-        const partySnapshot = await getDoc(partyDoc).catch(() => null);
-
-        if (!partySnapshot || !partySnapshot.exists()) {
-             try { await message.delete(); } catch (e) { console.error('Error al borrar mensaje:', e); }
-             await channel.send('No se pudo encontrar la plantilla original de la party en la base de datos.').then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
-             return;
-        }
-        const originalCompoContent = partySnapshot.data().original_compo_content;
 
         try {
             let lineas = mensajePrincipal.content.split('\n');
-            const resultado = await removeUserFromList(lineas, author.id, originalCompoContent);
+            let oldSpotIndex = -1;
 
-            if (!resultado.success) {
-                try {
-                    await message.delete();
-                } catch (e) {
-                    console.error('Error al intentar borrar el mensaje:', e);
+            for (const [index, linea] of lineas.entries()) {
+                if (linea.includes(`<@${author.id}>`)) {
+                    oldSpotIndex = index;
+                    break;
                 }
+            }
+            
+            if (oldSpotIndex === -1) {
+                await message.delete().catch(() => {});
                 const mensajeError = await channel.send(`❌ <@${author.id}>, no estás apuntado en esta party.`);
                 setTimeout(() => mensajeError.delete().catch(() => {}), 10000);
                 return;
             }
 
-            await mensajePrincipal.edit({ content: resultado.updatedLines.join('\n') });
-            try {
-                await message.delete();
-            } catch (e) {
-                console.error('Error al intentar borrar el mensaje:', e);
+            const oldLine = lineas[oldSpotIndex];
+            const oldSpot = parseInt(oldLine.trim().split('.')[0]);
+            const regexRol = new RegExp(`^${oldSpot}\\.(.*?)(<@${author.id}>)`);
+            const match = oldLine.match(regexRol);
+
+            if (match && match[1].trim() !== '') {
+                lineas[oldSpotIndex] = `${oldSpot}.${match[1].trim()}`;
+            } else {
+                const regexClean = new RegExp(`(<@${author.id}>)`);
+                lineas[oldSpotIndex] = oldLine.replace(regexClean, '').trim();
             }
 
-            const mensajeConfirmacion = await channel.send(`✅ <@${author.id}>, te has desapuntado del puesto **${resultado.oldSpot}**.`);
+            await mensajePrincipal.edit({ content: lineas.join('\n') });
+            await message.delete().catch(() => {});
+
+            const mensajeConfirmacion = await channel.send(`✅ <@${author.id}>, te has desapuntado del puesto **${oldSpot}**.`);
             setTimeout(() => mensajeConfirmacion.delete().catch(() => {}), 10000);
             return;
         } catch (error) {
             console.error('Error procesando mensaje para desapuntar:', error);
-            try {
-                await message.delete();
-            } catch (e) {
-                console.error('Error al intentar borrar el mensaje:', e);
-            }
+            await message.delete().catch(() => {});
             channel.send(`Hubo un error al procesar tu solicitud, <@${author.id}>. Por favor, inténtalo de nuevo.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
             return;
         }
@@ -881,11 +787,7 @@ client.on(Events.MessageCreate, async message => {
     }
 
     try {
-        try {
-            await message.delete();
-        } catch (e) {
-            console.error('Error al intentar borrar el mensaje:', e);
-        }
+        await message.delete();
 
         const mensajePrincipal = await channel.fetchStarterMessage();
         if (!mensajePrincipal) {
@@ -894,19 +796,32 @@ client.on(Events.MessageCreate, async message => {
 
         let lineas = mensajePrincipal.content.split('\n');
         
-        // CORRECCIÓN: Obtenemos la plantilla original para la función removeUserFromList
-        const partyDoc = doc(db, partyMessagesCollectionRef.path, mensajePrincipal.id);
-        const partySnapshot = await getDoc(partyDoc).catch(() => null);
-
-        if (!partySnapshot || !partySnapshot.exists()) {
-             await channel.send('No se pudo encontrar la plantilla original de la party en la base de datos.').then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
-             return;
+        let oldSpotIndex = -1;
+        for (const [index, linea] of lineas.entries()) {
+            const regex = new RegExp(`<@${author.id}>`);
+            if (regex.test(linea)) {
+                oldSpotIndex = index;
+                break;
+            }
         }
-        const originalCompoContent = partySnapshot.data().original_compo_content;
-        
-        const resultadoEliminacion = await removeUserFromList(lineas, author.id, originalCompoContent);
-        if (resultadoEliminacion.success) {
-            lineas = resultadoEliminacion.updatedLines;
+
+        if (oldSpotIndex !== -1) {
+            const oldLine = lineas[oldSpotIndex];
+            const oldSpot = parseInt(oldLine.trim().split('.')[0]);
+            
+            const regexUser = new RegExp(`<@${author.id}>`);
+            const remainingContent = oldLine.replace(regexUser, '').trim();
+
+            if (oldSpot >= 35) {
+                lineas[oldSpotIndex] = `${oldSpot}. X`;
+            } else {
+                const rolMatch = remainingContent.match(/(\d+\.\s*)(.*)/);
+                if (rolMatch) {
+                    lineas[oldSpotIndex] = `${rolMatch[1]}${rolMatch[2]}`;
+                } else {
+                    lineas[oldSpotIndex] = `${oldSpot}.`;
+                }
+            }
         }
     
         const indiceLinea = lineas.findIndex(linea => linea.startsWith(`${numero}.`));
@@ -928,8 +843,8 @@ client.on(Events.MessageCreate, async message => {
                 const colector = channel.createMessageCollector({ filter: filtro, max: 1, time: 60000 });
     
                 colector.on('collect', async m => {
-                    try { await preguntaRol.delete(); } catch(e) {}
-                    try { await m.delete(); } catch(e) {}
+                    await preguntaRol.delete().catch(() => {});
+                    await m.delete().catch(() => {});
                     const rol = m.content;
                     const nuevoValor = `${numero}. ${rol} <@${author.id}>`;
                     lineas[indiceLinea] = nuevoValor;
