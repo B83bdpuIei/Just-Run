@@ -396,14 +396,17 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.editReply('Hubo un error al cargar los templates de party para eliminar.');
             }
         } else if (commandName === 'edit_comp') {
+            // --- CORRECCIÓN: Deferir la respuesta inmediatamente ---
+            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
             if (!interaction.channel.isThread()) {
-                await interaction.reply({ content: 'Este comando solo se puede usar dentro de un hilo de party.', flags: [MessageFlags.Ephemeral] });
+                await interaction.editReply('Este comando solo se puede usar dentro de un hilo de party.');
                 return;
             }
 
             const mensajePrincipal = await interaction.channel.fetchStarterMessage();
             if (!mensajePrincipal) {
-                await interaction.reply({ content: 'No se pudo encontrar el mensaje principal de la party.', flags: [MessageFlags.Ephemeral] });
+                await interaction.editReply('No se pudo encontrar el mensaje principal de la party.');
                 return;
             }
 
@@ -417,7 +420,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 ]);
 
             const row = new ActionRowBuilder().addComponents(selectMenu);
-            await interaction.reply({ content: 'Selecciona lo que quieres editar:', components: [row], flags: [MessageFlags.Ephemeral] });
+            await interaction.editReply({ content: 'Selecciona lo que quieres editar:', components: [row] });
         }
     } else if (interaction.isStringSelectMenu()) {
         if (interaction.customId === 'select_compo') {
