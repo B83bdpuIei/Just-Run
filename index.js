@@ -126,7 +126,7 @@ function parsearParticipantes(lineas) {
 }
 
 client.on(Events.InteractionCreate, async interaction => {
-    try { // AÑADIDO: Bloque try...catch para evitar que el bot se caiga
+    try {
         if (interaction.isChatInputCommand()) {
             const { commandName } = interaction;
             
@@ -135,7 +135,6 @@ client.on(Events.InteractionCreate, async interaction => {
                     await interaction.reply({ content: 'Este comando solo se puede usar en un canal de texto normal, no en un hilo.', flags: [MessageFlags.Ephemeral] });
                     return;
                 }
-                // CAMBIO: deferReply debe ir al principio para evitar el timeout
                 await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
                 if (!db) {
@@ -324,7 +323,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 
                     const filtro = m => m.author.id === interaction.user.id;
                     const colector = hilo.createMessageCollector({ filter: filtro, max: 1, time: 60000 });
-    
+
                     colector.on('collect', async m => {
                         await preguntaRol.delete().catch(() => {});
                         await m.delete().catch(() => {});
@@ -335,7 +334,7 @@ client.on(Events.InteractionCreate, async interaction => {
                         await interaction.editReply(`✅ Usuario <@${usuarioAAgregar.id}> añadido al puesto **${puestoAAgregar}** como **${rol}**.`);
                         colector.stop();
                     });
-    
+
                     colector.on('end', collected => {
                         if (collected.size === 0) {
                             interaction.editReply(`🚫 No respondiste a tiempo. El usuario <@${usuarioAAgregar.id}> no ha sido añadido.`);
@@ -517,156 +516,6 @@ client.on(Events.InteractionCreate, async interaction => {
                 modal.addComponents(new ActionRowBuilder().addComponents(valorInput));
                 await interaction.showModal(modal);
             }
-        } else if (interaction.type === InteractionType.ModalSubmit) {
-            if (interaction.customId === 'add_compo_modal') {
-                const compoName = interaction.fields.getTextInputValue('compo_name');
-                const compoContent = interaction.fields.getTextInputValue('compo_content');
-                
-                if (!db) {
-                    await interaction.reply({ content: 'Error: La base de datos no está disponible.', flags: [MessageFlags.Ephemeral] });
-                    return;
-                }
-
-                try {
-                    await addDoc(composCollectionRef, {
-                        name: compoName,
-                        content: compoContent
-                    });
-                    await interaction.reply({ content: `✅ El template de party **${compoName}** ha sido guardado.`, flags: [MessageFlags.Ephemeral] });
-                } catch (error) {
-                    console.error('Error al guardar el template de party:', error);
-                    await interaction.reply({ content: 'Hubo un error al guardar el template.', flags: [MessageFlags.Ephemeral] });
-                }
-                return;
-            }
-
-            if (interaction.customId.startsWith('start_comp_modal_')) {
-                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] }); // CAMBIO: Deferir respuesta del modal
-
-                const compoId = interaction.customId.split('_')[3];
-
-                if (!db) {
-                    await interaction.editReply('Error: La base de datos no está disponible.');
-                    return;
-                }
-
-                try {
-                    const docRef = doc(db, `artifacts/${appId}/public/data/compos`, compoId);
-                    const selectedCompo = await getDoc(docRef);
-
-                    if (!selectedCompo.exists()) {
-                        await interaction.editReply('Error: El template de party no fue encontrado.');
-                        return;
-                    }
-                    const compoContent = selectedCompo.data().content;
-                    const compoName = selectedCompo.data().name; // AÑADIDO: Se obtiene el compoName aquí
-
-                    const horaMasseo = interaction.fields.getTextInputValue('hora_masseo');
-                    const tiempoFinalizacionStr = interaction.fields.getTextInputValue('tiempo_finalizacion');
-                    const mensajeEncabezado = interaction.fields.getTextInputValue('mensaje_encabezado');
-
-                    let totalMilisegundos = 0;
-                    const regexHoras = /(\d+)\s*h/;
-                    const regexMinutos = /(\d+)\s*m/;
-
-                    const matchHoras = tiempoFinalizacionStr.match(regexHoras);
-                    const matchMinutos = tiempoFinalizacionStr.match(regexMinutos);
-
-                    if (matchHoras) {
-                        totalMilisegundos += parseInt(matchHoras[1]) * 60 * 60 * 1000;
-                    }
-                    if (matchMinutos) {
-                        totalMilisegundos += parseInt(matchMinutos[1]) * 60 * 1000;
-                    }
-
-                    const fechaFinalizacion = Math.floor((Date.now() + totalMilisegundos) / 1000);
-
-                    const mensajeCompleto = `${horaMasseo}
-${mensajeEncabezado || ''}
-
-**INSCRIPCIONES TERMINAN:** <t:${fechaFinalizacion}:R>
-
-${compoContent}`;
-
-                    const desapuntarmeButton = new ButtonBuilder()
-                        .setCustomId('desapuntarme_button')
-                        .setLabel('❌ Desapuntarme')
-                        .setStyle(ButtonStyle.Danger);
-
-                    const buttonRow = new ActionRowBuilder().addComponents(desapuntarmeButton);
-
-                    const mensajePrincipal = await interaction.channel.send({ content: mensajeCompleto });
-                    
-                    originalCompoContent.set(mensajePrincipal.id, compoContent);
-
-                    const hilo = await mensajePrincipal.startThread({
-                        name: "Inscripción de la party",
-                        autoArchiveDuration: 60,
-                    });
-                    
-                    await hilo.send({ content: "¡Escribe un número para apuntarte!", components: [buttonRow] });
-
-                    if (totalMilisegundos > 0) {
-                        await hilo.send(`El hilo se bloqueará automáticamente en **${tiempoFinalizacionStr}**.`);
-                        
-                        setTimeout(async () => {
-                            try {
-                                const canalHilo = await client.channels.fetch(hilo.id);
-                                if (canalHilo && !canalHilo.archived && !canalHilo.locked) {
-                                    await canalHilo.setLocked(true);
-                                    await canalHilo.send('¡Las inscripciones han terminado! Este hilo ha sido bloqueado y ya no se pueden añadir más participantes.');
-                                } else {
-                                    console.log(`El hilo ${hilo.id} ya no existe, está archivado o ya está bloqueado. No se puede bloquear.`);
-                                }
-                            } catch (error) {
-                                console.error(`Error al bloquear el hilo ${hilo.id}:`, error);
-                            }
-                        }, totalMilisegundos);
-                    }
-
-                    await interaction.editReply({ content: `✅ La party se ha iniciado correctamente. Puedes verla en <#${hilo.id}>.`, flags: [MessageFlags.Ephemeral] });
-
-                } catch (error) {
-                    console.error('Error al crear la party o el hilo:', error);
-                    await interaction.editReply({ content: 'Hubo un error al intentar crear la party. Por favor, asegúrate de que el bot tenga los permisos necesarios.', flags: [MessageFlags.Ephemeral] });
-                }
-            } else if (interaction.customId.startsWith('edit_comp_modal_')) {
-                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-
-                const partes = interaction.customId.split('_');
-                const mensajePrincipalId = partes[3];
-                const campoAEditar = partes[4];
-                const nuevoValor = interaction.fields.getTextInputValue('nuevo_valor');
-
-                try {
-                    const mensajePrincipal = await interaction.channel.messages.fetch(mensajePrincipalId);
-                    if (!mensajePrincipal) {
-                        await interaction.editReply('No se pudo encontrar el mensaje a editar.');
-                        return;
-                    }
-                    
-                    let lineas = mensajePrincipal.content.split('\n');
-                    
-                    if (campoAEditar === 'hora') {
-                        lineas[0] = nuevoValor;
-                    } else if (campoAEditar === 'encabezado') {
-                        const finalHoraIndex = 0;
-                        const inicioInscripcionesIndex = lineas.findIndex(linea => linea.startsWith('**INSCRIPCIONES TERMINAN:**'));
-
-                        if (inicioInscripcionesIndex > finalHoraIndex + 1) {
-                            lineas.splice(finalHoraIndex + 1, inicioInscripcionesIndex - (finalHoraIndex + 1), nuevoValor);
-                        } else if (nuevoValor) {
-                            lineas.splice(finalHoraIndex + 1, 0, nuevoValor);
-                        }
-                    }
-                    
-                    await mensajePrincipal.edit(lineas.join('\n'));
-                    await interaction.editReply(`✅ Se ha actualizado la **${campoAEditar}** del mensaje principal.`);
-                } catch (error) {
-                    console.error('Error al editar el mensaje de la compo:', error);
-                    await interaction.editReply('Hubo un error al intentar editar el mensaje.');
-                }
-            }
         } else if (interaction.isButton()) {
             if (interaction.customId === 'desapuntarme_button') {
                 await interaction.deferReply({ ephemeral: true });
@@ -685,48 +534,55 @@ ${compoContent}`;
                     return;
                 }
                 
-                let lineas = mensajePrincipal.content.split('\n');
-                let oldSpotIndex = -1;
+                try {
+                    let lineas = mensajePrincipal.content.split('\n');
+                    let oldSpotIndex = -1;
+                    let oldSpot = -1;
 
-                for (const [index, linea] of lineas.entries()) {
-                    if (linea.includes(`<@${user.id}>`)) {
-                        oldSpotIndex = index;
-                        break;
+                    for (const [index, linea] of lineas.entries()) {
+                        if (linea.includes(`<@${user.id}>`)) {
+                            oldSpotIndex = index;
+                            oldSpot = parseInt(linea.trim().split('.')[0]);
+                            break;
+                        }
                     }
-                }
-                
-                if (oldSpotIndex === -1) {
-                    await interaction.editReply('No estás apuntado en esta party.');
-                    return;
-                }
+                    
+                    if (oldSpotIndex === -1) {
+                        await interaction.editReply('No estás apuntado en esta party.');
+                        return;
+                    }
 
-                const oldLine = lineas[oldSpotIndex];
-                const oldSpot = parseInt(oldLine.trim().split('.')[0]);
-                
-                const originalContent = originalCompoContent.get(mensajePrincipal.id);
-                if (!originalContent) {
-                    await interaction.editReply('Error: No se pudo encontrar la plantilla original para restaurar el puesto.');
-                    return;
-                }
-                const originalLines = originalContent.split('\n');
-                const originalLineForSpot = originalLines.find(linea => linea.startsWith(`${oldSpot}.`));
+                    // --- LÓGICA DE CORRECCIÓN PARA EL BOTÓN DESAPUNTAR ---
+                    const originalContent = originalCompoContent.get(mensajePrincipal.id);
+                    if (!originalContent) {
+                        await interaction.editReply('Error: No se pudo encontrar la plantilla original para restaurar el puesto.');
+                        return;
+                    }
 
-                if (originalLineForSpot) {
+                    const originalLines = originalContent.split('\n');
                     const inicioPartyIndex = lineas.findIndex(linea => linea.startsWith('1.'));
-                    if (inicioPartyIndex !== -1) {
-                        const offset = oldSpotIndex - inicioPartyIndex;
-                        lineas[oldSpotIndex] = originalLines[offset];
-                    } else {
-                        lineas[oldSpotIndex] = originalLineForSpot;
+                    if (inicioPartyIndex === -1) {
+                        await interaction.editReply('Error: No se pudo encontrar el inicio de la lista de party.');
+                        return;
                     }
-                } else {
-                    const regexClean = new RegExp(`(<@${user.id}>)`);
-                    lineas[oldSpotIndex] = oldLine.replace(regexClean, '').trim();
-                }
 
-                await mensajePrincipal.edit({ content: lineas.join('\n') });
-                
-                await interaction.editReply(`✅ Te has desapuntado del puesto **${oldSpot}**.`);
+                    const offset = oldSpotIndex - inicioPartyIndex;
+                    const originalLineForSpot = originalLines[offset];
+                    
+                    if (originalLineForSpot) {
+                        lineas[oldSpotIndex] = originalLineForSpot;
+                    } else {
+                        // Fallback por si acaso, aunque no debería ocurrir con la lógica anterior
+                        const regexClean = new RegExp(`(<@${user.id}>)`);
+                        lineas[oldSpotIndex] = lineas[oldSpotIndex].replace(regexClean, '').trim();
+                    }
+
+                    await mensajePrincipal.edit({ content: lineas.join('\n') });
+                    await interaction.editReply(`✅ Te has desapuntado del puesto **${oldSpot}**.`);
+                } catch (error) {
+                    console.error('Error procesando el botón de desapuntar:', error);
+                    await interaction.editReply('Hubo un error al intentar desapuntarte. Por favor, inténtalo de nuevo.');
+                }
             }
         } else if (interaction.type === InteractionType.ModalSubmit) {
             if (interaction.customId === 'add_compo_modal') {
@@ -879,16 +735,14 @@ ${compoContent}`;
                 }
             }
         }
-    } catch (error) { // AÑADIDO: Catch global para evitar el crasheo
+    } catch (error) {
         console.error('Error no controlado en InteractionCreate:', error);
-        // Intentamos responder si no se ha hecho ya
         if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
             await interaction.reply({ content: 'Ocurrió un error inesperado. Por favor, inténtalo de nuevo.', ephemeral: true }).catch(() => {});
         }
     }
 });
 
-// Evento: Mensajes en el canal para las inscripciones
 client.on(Events.MessageCreate, async message => {
     if (message.author.bot || !message.channel.isThread()) {
         return;
@@ -917,10 +771,12 @@ client.on(Events.MessageCreate, async message => {
         try {
             let lineas = mensajePrincipal.content.split('\n');
             let oldSpotIndex = -1;
+            let oldSpot = -1;
 
             for (const [index, linea] of lineas.entries()) {
                 if (linea.includes(`<@${author.id}>`)) {
                     oldSpotIndex = index;
+                    oldSpot = parseInt(linea.trim().split('.')[0]);
                     break;
                 }
             }
@@ -931,10 +787,8 @@ client.on(Events.MessageCreate, async message => {
                 setTimeout(() => mensajeError.delete().catch(() => {}), 10000);
                 return;
             }
-
-            const oldLine = lineas[oldSpotIndex];
-            const oldSpot = parseInt(oldLine.trim().split('.')[0]);
             
+            // --- LÓGICA DE CORRECCIÓN PARA EL MENSAJE 'desapuntar' ---
             const originalContent = originalCompoContent.get(mensajePrincipal.id);
             if (!originalContent) {
                 await message.delete().catch(() => {});
@@ -942,20 +796,24 @@ client.on(Events.MessageCreate, async message => {
                 setTimeout(() => mensajeError.delete().catch(() => {}), 10000);
                 return;
             }
+
             const originalLines = originalContent.split('\n');
-            const originalLineForSpot = originalLines.find(linea => linea.startsWith(`${oldSpot}.`));
+            const inicioPartyIndex = lineas.findIndex(linea => linea.startsWith('1.'));
+            if (inicioPartyIndex === -1) {
+                await message.delete().catch(() => {});
+                const mensajeError = await channel.send('Error: No se pudo encontrar el inicio de la lista de party.');
+                setTimeout(() => mensajeError.delete().catch(() => {}), 10000);
+                return;
+            }
+
+            const offset = oldSpotIndex - inicioPartyIndex;
+            const originalLineForSpot = originalLines[offset];
 
             if (originalLineForSpot) {
-                const inicioPartyIndex = lineas.findIndex(linea => linea.startsWith('1.'));
-                if (inicioPartyIndex !== -1) {
-                    const offset = oldSpotIndex - inicioPartyIndex;
-                    lineas[oldSpotIndex] = originalLines[offset];
-                } else {
-                    lineas[oldSpotIndex] = originalLineForSpot;
-                }
+                lineas[oldSpotIndex] = originalLineForSpot;
             } else {
                 const regexClean = new RegExp(`(<@${author.id}>)`);
-                lineas[oldSpotIndex] = oldLine.replace(regexClean, '').trim();
+                lineas[oldSpotIndex] = lineas[oldSpotIndex].replace(regexClean, '').trim();
             }
 
             await mensajePrincipal.edit({ content: lineas.join('\n') });
