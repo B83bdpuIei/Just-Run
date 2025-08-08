@@ -151,7 +151,7 @@ function rebuildMessage(originalContent, newContent, fieldToEdit) {
     return finalMessage.trim();
 }
 
-// --- NUEVA FUNCIÓN PARA ELIMINAR USUARIOS DE LA LISTA DE FORMA ROBUSTA ---
+// Función mejorada para eliminar usuarios de la lista de forma robusta
 function removeUserFromList(lineas, userId) {
     let oldSpotIndex = -1;
     const userRegex = new RegExp(`<@${userId}>`);
@@ -170,15 +170,19 @@ function removeUserFromList(lineas, userId) {
     const oldLine = lineas[oldSpotIndex];
     const oldSpot = parseInt(oldLine.trim().split('.')[0]);
 
-    // Obtener la parte de la línea sin el usuario
+    // Encontrar la parte de la línea sin el usuario
     const remainingContent = oldLine.replace(userRegex, '').trim();
 
-    // Verificamos si el puesto era un puesto vacío 'X'
-    if (remainingContent.endsWith('. X') || remainingContent.endsWith('.X')) {
+    // Comprobar si la línea antes de la mención del usuario es solo un número y un punto, o si es un 'X'
+    const roleMatch = remainingContent.match(/^\d+\.\s*(.*?)$/);
+    const rolePart = roleMatch ? roleMatch[1].trim() : '';
+    
+    if (rolePart === '' || rolePart.toUpperCase() === 'X') {
+        // Restaurar a 'X' si no había rol o si el rol era 'X'
         lineas[oldSpotIndex] = `${oldSpot}. X`;
     } else {
-        // Restaurar a la línea original sin la mención del usuario
-        lineas[oldSpotIndex] = remainingContent;
+        // Restaurar al rol original
+        lineas[oldSpotIndex] = `${oldSpot}. ${rolePart}`;
     }
 
     return { success: true, updatedLines: lineas, oldSpot: oldSpot };
@@ -405,7 +409,13 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.editReply('Hubo un error al cargar los templates de party para eliminar.');
             }
         } else if (commandName === 'edit_comp') {
-            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+            // CORRECCIÓN: Usamos un try-catch para manejar el error de interacción
+            try {
+                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+            } catch (e) {
+                console.error('Error al deferir la respuesta del comando edit-comp:', e);
+                return; // Detiene la ejecución si no se puede deferir.
+            }
 
             if (!interaction.channel.isThread()) {
                 await interaction.editReply('Este comando solo se puede usar dentro de un hilo de party.');
@@ -802,27 +812,10 @@ client.on(Events.MessageCreate, async message => {
 
         let lineas = mensajePrincipal.content.split('\n');
         
-        let oldSpotIndex = -1;
-        for (const [index, linea] of lineas.entries()) {
-            const regex = new RegExp(`<@${author.id}>`);
-            if (regex.test(linea)) {
-                oldSpotIndex = index;
-                break;
-            }
-        }
-
-        if (oldSpotIndex !== -1) {
-            const oldLine = lineas[oldSpotIndex];
-            const oldSpot = parseInt(oldLine.trim().split('.')[0]);
-            
-            const regexUser = new RegExp(`<@${author.id}>`);
-            const remainingContent = oldLine.replace(regexUser, '').trim();
-
-            if (remainingContent.endsWith('. X') || remainingContent.endsWith('.X')) {
-                lineas[oldSpotIndex] = `${oldSpot}. X`;
-            } else {
-                lineas[oldSpotIndex] = remainingContent;
-            }
+        // --- CORRECCIÓN: Usamos la función mejorada para desapuntar si ya estaba en la lista ---
+        const resultadoEliminacion = removeUserFromList(lineas, author.id);
+        if (resultadoEliminacion.success) {
+            lineas = resultadoEliminacion.updatedLines;
         }
     
         const indiceLinea = lineas.findIndex(linea => linea.startsWith(`${numero}.`));
