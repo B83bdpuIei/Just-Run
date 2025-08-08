@@ -96,6 +96,10 @@ client.on('ready', async () => {
             .setName('delete_comp')
             .setDescription('Elimina un template de party guardado.')
             .setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads),
+        new SlashCommandBuilder()
+            .setName('edit_comp')
+            .setDescription('Edita el mensaje principal de la party.')
+            .setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads)
     ];
 
     try {
@@ -126,7 +130,6 @@ client.on(Events.InteractionCreate, async interaction => {
         const { commandName } = interaction;
         
         if (commandName === 'start_comp') {
-            // --- CORRECCIÓN: Evitar usar el comando en hilos ---
             if (interaction.channel.isThread()) {
                 await interaction.reply({ content: 'Este comando solo se puede usar en un canal de texto normal, no en un hilo.', flags: [MessageFlags.Ephemeral] });
                 return;
@@ -365,6 +368,29 @@ client.on(Events.InteractionCreate, async interaction => {
                 console.error('Error al obtener compos para eliminar:', error);
                 await interaction.editReply('Hubo un error al cargar los templates de party para eliminar.');
             }
+        } else if (commandName === 'edit_comp') {
+            // Manejador del comando /edit-comp
+            if (!interaction.channel.isThread()) {
+                await interaction.reply({ content: 'Este comando solo se puede usar dentro de un hilo de party.', flags: [MessageFlags.Ephemeral] });
+                return;
+            }
+
+            const mensajePrincipal = await interaction.channel.fetchStarterMessage();
+            if (!mensajePrincipal) {
+                await interaction.reply({ content: 'No se pudo encontrar el mensaje principal de la party.', flags: [MessageFlags.Ephemeral] });
+                return;
+            }
+
+            const selectMenu = new StringSelectMenuBuilder()
+                .setCustomId(`edit_comp_select_${mensajePrincipal.id}`)
+                .setPlaceholder('¿Qué parte del mensaje quieres editar?')
+                .addOptions([
+                    { label: 'Hora del Masse o evento', value: 'hora' },
+                    { label: 'Mensaje de Encabezado', value: 'encabezado' },
+                ]);
+
+            const row = new ActionRowBuilder().addComponents(selectMenu);
+            await interaction.reply({ content: 'Selecciona lo que quieres editar:', components: [row], flags: [MessageFlags.Ephemeral] });
         }
     } else if (interaction.isStringSelectMenu()) {
         if (interaction.customId === 'select_compo') {
@@ -445,6 +471,39 @@ client.on(Events.InteractionCreate, async interaction => {
                 console.error('Error al eliminar el template de party:', error);
                 await interaction.editReply('Hubo un error al eliminar el template. Por favor, inténtalo de nuevo.');
             }
+        } else if (interaction.customId.startsWith('edit_comp_select_')) {
+            const mensajePrincipalId = interaction.customId.split('_')[3];
+            const campoAEditar = interaction.values[0];
+
+            const modal = new ModalBuilder()
+                .setCustomId(`edit_comp_modal_${mensajePrincipalId}_${campoAEditar}`)
+                .setTitle(`Editar ${campoAEditar}`);
+
+            const valorActual = interaction.message.content;
+            let valorInput;
+
+            if (campoAEditar === 'hora') {
+                const matchHora = valorActual.match(/^(.*?)\n/);
+                const valor = matchHora ? matchHora[1] : '';
+                valorInput = new TextInputBuilder()
+                    .setCustomId('nuevo_valor')
+                    .setLabel('Nueva hora del masseo')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+                    .setValue(valor);
+            } else if (campoAEditar === 'encabezado') {
+                const matchHeader = valorActual.match(/\n(.*?)\n\n/s);
+                const valor = matchHeader ? matchHeader[1] : '';
+                valorInput = new TextInputBuilder()
+                    .setCustomId('nuevo_valor')
+                    .setLabel('Nuevo mensaje de encabezado')
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setRequired(false)
+                    .setValue(valor);
+            }
+            
+            modal.addComponents(new ActionRowBuilder().addComponents(valorInput));
+            await interaction.showModal(modal);
         }
     } else if (interaction.isButton()) {
         if (interaction.customId === 'desapuntarme_button') {
@@ -594,7 +653,6 @@ ${compoContent}`;
                     setTimeout(async () => {
                         try {
                             const canalHilo = await client.channels.fetch(hilo.id);
-                            // CORRECCIÓN: Usamos channel.locked en lugar de isLockedThread
                             if (canalHilo && !canalHilo.archived && !canalHilo.locked) {
                                 await canalHilo.setLocked(true);
                                 await canalHilo.send('¡Las inscripciones han terminado! Este hilo ha sido bloqueado y ya no se pueden añadir más participantes.');
@@ -613,6 +671,43 @@ ${compoContent}`;
                 console.error('Error al crear la party o el hilo:', error);
                 await interaction.editReply({ content: 'Hubo un error al intentar crear la party. Por favor, asegúrate de que el bot tenga los permisos necesarios.', flags: [MessageFlags.Ephemeral] });
             }
+        } else if (interaction.customId.startsWith('edit_comp_modal_')) {
+            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
+            const partes = interaction.customId.split('_');
+            const mensajePrincipalId = partes[3];
+            const campoAEditar = partes[4];
+            const nuevoValor = interaction.fields.getTextInputValue('nuevo_valor');
+
+            try {
+                const mensajePrincipal = await interaction.channel.messages.fetch(mensajePrincipalId);
+                if (!mensajePrincipal) {
+                    await interaction.editReply('No se pudo encontrar el mensaje a editar.');
+                    return;
+                }
+                
+                let lineas = mensajePrincipal.content.split('\n');
+                
+                if (campoAEditar === 'hora') {
+                    lineas[0] = nuevoValor;
+                } else if (campoAEditar === 'encabezado') {
+                    // Encontrar el final de la hora y el inicio de las inscripciones para reemplazar el encabezado
+                    const finalHoraIndex = 0;
+                    const inicioInscripcionesIndex = lineas.findIndex(linea => linea.startsWith('**INSCRIPCIONES TERMINAN:**'));
+
+                    if (inicioInscripcionesIndex > finalHoraIndex + 1) {
+                        lineas.splice(finalHoraIndex + 1, inicioInscripcionesIndex - (finalHoraIndex + 1), nuevoValor);
+                    } else if (nuevoValor) {
+                        lineas.splice(finalHoraIndex + 1, 0, nuevoValor);
+                    }
+                }
+                
+                await mensajePrincipal.edit(lineas.join('\n'));
+                await interaction.editReply(`✅ Se ha actualizado la **${campoAEditar}** del mensaje principal.`);
+            } catch (error) {
+                console.error('Error al editar el mensaje de la compo:', error);
+                await interaction.editReply('Hubo un error al intentar editar el mensaje.');
+            }
         }
     }
 });
@@ -626,7 +721,6 @@ client.on(Events.MessageCreate, async message => {
     const { channel, author, content } = message;
     const numero = parseInt(content.trim());
     
-    // --- CORRECCIÓN: Si el hilo está bloqueado, no se permiten inscripciones por número ---
     if (channel.locked) {
         if (content.trim().toLowerCase() !== 'desapuntar' && !isNaN(numero)) {
             await message.delete().catch(() => {});
@@ -636,7 +730,6 @@ client.on(Events.MessageCreate, async message => {
         }
     }
     
-    // Verificamos si el mensaje es para desapuntarse
     if (content.trim().toLowerCase() === 'desapuntar') {
         const mensajePrincipal = await channel.fetchStarterMessage().catch(() => null);
         if (!mensajePrincipal) {
@@ -689,7 +782,6 @@ client.on(Events.MessageCreate, async message => {
         }
     }
     
-    // Lógica para apuntarse con números
     if (isNaN(numero) || numero < 1 || numero > 50) {
         return;
     }
