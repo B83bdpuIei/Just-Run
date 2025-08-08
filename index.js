@@ -36,6 +36,7 @@ app.listen(port, () => {
 // --- Lógica Principal del Bot de Discord ---
 let db;
 let composCollectionRef;
+let partyMessagesCollectionRef; // Nueva colección para guardar el estado de las parties
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
 // === CONFIGURACIÓN DE FIRESTORE: AÑADE TU OBJETO AQUÍ ===
@@ -57,6 +58,7 @@ client.on('ready', async () => {
         const firebaseApp = initializeApp(firebaseConfig);
         db = getFirestore(firebaseApp);
         composCollectionRef = collection(db, `artifacts/${appId}/public/data/compos`);
+        partyMessagesCollectionRef = collection(db, `artifacts/${appId}/public/data/party_messages`);
         console.log('✅ Firestore inicializado con éxito.');
     } catch (error) {
         console.error('ERROR CRÍTICO: No se pudo inicializar Firestore. Las funcionalidades de base de datos no estarán disponibles.', error);
@@ -152,7 +154,7 @@ function rebuildMessage(originalContent, newContent, fieldToEdit) {
 }
 
 // Función mejorada para eliminar usuarios de la lista de forma robusta
-function removeUserFromList(lineas, userId) {
+async function removeUserFromList(lineas, userId, originalCompoContent) {
     let oldSpotIndex = -1;
     const userRegex = new RegExp(`<@${userId}>`);
 
@@ -170,15 +172,16 @@ function removeUserFromList(lineas, userId) {
     const oldLine = lineas[oldSpotIndex];
     const oldSpot = parseInt(oldLine.trim().split('.')[0]);
 
-    // Encontrar la parte de la línea sin el usuario
-    const remainingContent = oldLine.replace(userRegex, '').trim();
+    // Buscar la línea original en la plantilla guardada
+    const originalCompoLines = originalCompoContent.split('\n');
+    const originalLine = originalCompoLines.find(line => line.startsWith(`${oldSpot}.`));
 
-    // Comprobar si la línea antes de la mención del usuario era un 'X'
-    if (remainingContent.endsWith('. X') || remainingContent.endsWith('.X')) {
-        lineas[oldSpotIndex] = `${oldSpot}. X`;
+    // Si encontramos la línea original, la usamos para restaurar el puesto
+    if (originalLine) {
+        lineas[oldSpotIndex] = originalLine;
     } else {
-        // Restaurar al rol original o a la línea completa
-        lineas[oldSpotIndex] = remainingContent;
+        // Si no, asumimos que era un puesto dinámico (ej. con "X") y lo restauramos a ese estado
+        lineas[oldSpotIndex] = `${oldSpot}. X`;
     }
 
     return { success: true, updatedLines: lineas, oldSpot: oldSpot };
@@ -268,10 +271,20 @@ client.on(Events.InteractionCreate, async interaction => {
                     return;
                 }
 
+                // Obtener la plantilla original de Firestore
+                const partyDoc = await doc(partyMessagesCollectionRef, mensajePrincipal.id);
+                const partySnapshot = await getDoc(partyDoc);
+                if (!partySnapshot.exists()) {
+                    await interaction.editReply('No se pudo encontrar la plantilla original de la party en la base de datos.');
+                    return;
+                }
+                const originalCompoContent = partySnapshot.data().original_compo_content;
+
+
                 const usuarioARemover = interaction.options.getUser('usuario');
                 let lineas = mensajePrincipal.content.split('\n');
 
-                const resultado = removeUserFromList(lineas, usuarioARemover.id);
+                const resultado = removeUserFromList(lineas, usuarioARemover.id, originalCompoContent);
 
                 if (!resultado.success) {
                     await interaction.editReply(`El usuario <@${usuarioARemover.id}> no se encuentra en la lista de la party.`);
@@ -312,12 +325,17 @@ client.on(Events.InteractionCreate, async interaction => {
                 const participanteAnterior = participantes.get(usuarioAAgregar.id);
                 
                 if (participanteAnterior) {
-                    const lineaAnteriorIndex = lineas.findIndex(linea => linea.startsWith(`${participanteAnterior}.`));
-                    if (lineaAnteriorIndex !== -1) {
-                        const resultado = removeUserFromList(lineas, usuarioAAgregar.id);
-                        if (resultado.success) {
-                           lineas = resultado.updatedLines;
-                        }
+                    // Obtener la plantilla original de Firestore
+                    const partyDoc = doc(partyMessagesCollectionRef, mensajePrincipal.id);
+                    const partySnapshot = await getDoc(partyDoc);
+                    if (!partySnapshot.exists()) {
+                         await interaction.editReply('No se pudo encontrar la plantilla original de la party en la base de datos.');
+                         return;
+                    }
+                    const originalCompoContent = partySnapshot.data().original_compo_content;
+                    const resultado = await removeUserFromList(lineas, usuarioAAgregar.id, originalCompoContent);
+                    if (resultado.success) {
+                       lineas = resultado.updatedLines;
                     }
                 }
 
@@ -417,7 +435,6 @@ client.on(Events.InteractionCreate, async interaction => {
                 return;
             }
             
-            // CORRECCIÓN: Manejamos el error si no se encuentra el mensaje principal
             let mensajePrincipal;
             try {
                 mensajePrincipal = await interaction.channel.fetchStarterMessage();
@@ -526,7 +543,14 @@ client.on(Events.InteractionCreate, async interaction => {
             const mensajePrincipalId = interaction.customId.split('_')[3];
             const campoAEditar = interaction.values[0];
 
-            const mensajePrincipal = await interaction.channel.messages.fetch(mensajePrincipalId);
+            let mensajePrincipal;
+            try {
+                mensajePrincipal = await interaction.channel.messages.fetch(mensajePrincipalId);
+            } catch (e) {
+                await interaction.reply({ content: 'No se pudo encontrar el mensaje a editar. Es posible que haya sido eliminado.', ephemeral: true });
+                return;
+            }
+            
             const valorActual = mensajePrincipal.content;
 
             const modal = new ModalBuilder()
@@ -593,9 +617,18 @@ client.on(Events.InteractionCreate, async interaction => {
                 return;
             }
             
+            // Obtener la plantilla original de Firestore
+            const partyDoc = doc(db, partyMessagesCollectionRef.path, mensajePrincipal.id);
+            const partySnapshot = await getDoc(partyDoc);
+            if (!partySnapshot.exists()) {
+                await interaction.editReply('No se pudo encontrar la plantilla original de la party en la base de datos.');
+                return;
+            }
+            const originalCompoContent = partySnapshot.data().original_compo_content;
+            
             try {
                 let lineas = mensajePrincipal.content.split('\n');
-                const resultado = removeUserFromList(lineas, user.id);
+                const resultado = await removeUserFromList(lineas, user.id, originalCompoContent);
 
                 if (!resultado.success) {
                     await interaction.editReply('No estás apuntado en esta party.');
@@ -694,6 +727,11 @@ ${compoContent}`;
                     name: "Inscripción de la party",
                     autoArchiveDuration: 60,
                 });
+
+                // GUARDAMOS LA PLANTILLA ORIGINAL EN LA BASE DE DATOS
+                await setDoc(doc(partyMessagesCollectionRef, mensajePrincipal.id), {
+                    original_compo_content: compoContent
+                });
                 
                 // En lugar de enviar el botón en el mensaje principal, lo enviamos en el hilo.
                 await hilo.send({ content: "¡Escribe un número para apuntarte!", components: [buttonRow] });
@@ -730,13 +768,19 @@ ${compoContent}`;
             const campoAEditar = partes[4];
             const nuevoValor = interaction.fields.getTextInputValue('nuevo_valor');
 
+            let mensajePrincipal;
             try {
-                const mensajePrincipal = await interaction.channel.messages.fetch(mensajePrincipalId);
-                if (!mensajePrincipal) {
-                    await interaction.editReply('No se pudo encontrar el mensaje a editar.');
-                    return;
-                }
-                
+                mensajePrincipal = await interaction.channel.messages.fetch(mensajePrincipalId);
+            } catch (e) {
+                await interaction.editReply('No se pudo encontrar el mensaje a editar. Es posible que haya sido eliminado.');
+                return;
+            }
+            if (!mensajePrincipal) {
+                await interaction.editReply('No se pudo encontrar el mensaje a editar.');
+                return;
+            }
+            
+            try {
                 const originalContent = mensajePrincipal.content;
                 const nuevoMensaje = rebuildMessage(originalContent, nuevoValor, campoAEditar);
 
@@ -783,10 +827,21 @@ client.on(Events.MessageCreate, async message => {
             await channel.send('Lo sentimos, no hemos podido cargar el primer mensaje de este hilo. Por favor, intenta crear una nueva party.').then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
             return;
         }
+        
+        // Obtener la plantilla original de Firestore
+        const partyDoc = doc(db, partyMessagesCollectionRef.path, mensajePrincipal.id);
+        const partySnapshot = await getDoc(partyDoc).catch(() => null);
+
+        if (!partySnapshot || !partySnapshot.exists()) {
+             try { await message.delete(); } catch (e) { console.error('Error al borrar mensaje:', e); }
+             await channel.send('No se pudo encontrar la plantilla original de la party en la base de datos.').then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
+             return;
+        }
+        const originalCompoContent = partySnapshot.data().original_compo_content;
 
         try {
             let lineas = mensajePrincipal.content.split('\n');
-            const resultado = removeUserFromList(lineas, author.id);
+            const resultado = await removeUserFromList(lineas, author.id, originalCompoContent);
 
             if (!resultado.success) {
                 try {
@@ -839,8 +894,17 @@ client.on(Events.MessageCreate, async message => {
 
         let lineas = mensajePrincipal.content.split('\n');
         
-        // CORRECCIÓN: Usamos la función mejorada para desapuntar si ya estaba en la lista
-        const resultadoEliminacion = removeUserFromList(lineas, author.id);
+        // CORRECCIÓN: Obtenemos la plantilla original para la función removeUserFromList
+        const partyDoc = doc(db, partyMessagesCollectionRef.path, mensajePrincipal.id);
+        const partySnapshot = await getDoc(partyDoc).catch(() => null);
+
+        if (!partySnapshot || !partySnapshot.exists()) {
+             await channel.send('No se pudo encontrar la plantilla original de la party en la base de datos.').then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
+             return;
+        }
+        const originalCompoContent = partySnapshot.data().original_compo_content;
+        
+        const resultadoEliminacion = await removeUserFromList(lineas, author.id, originalCompoContent);
         if (resultadoEliminacion.success) {
             lineas = resultadoEliminacion.updatedLines;
         }
@@ -864,8 +928,8 @@ client.on(Events.MessageCreate, async message => {
                 const colector = channel.createMessageCollector({ filter: filtro, max: 1, time: 60000 });
     
                 colector.on('collect', async m => {
-                    await preguntaRol.delete().catch(() => {});
-                    await m.delete().catch(() => {});
+                    try { await preguntaRol.delete(); } catch(e) {}
+                    try { await m.delete(); } catch(e) {}
                     const rol = m.content;
                     const nuevoValor = `${numero}. ${rol} <@${author.id}>`;
                     lineas[indiceLinea] = nuevoValor;
