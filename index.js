@@ -52,6 +52,28 @@ const firebaseConfig = {
 
 const originalCompoContent = new Map();
 
+async function getOriginalContent(messageId, hilo) {
+    if (originalCompoContent.has(messageId)) {
+        return originalCompoContent.get(messageId);
+    }
+
+    if (db) {
+        try {
+            const docRef = doc(db, 'live_parties', messageId);
+            const docSnap = await getDoc(docRef);
+
+            if (docSnap.exists()) {
+                const content = docSnap.data().originalContent;
+                originalCompoContent.set(messageId, content);
+                return content;
+            }
+        } catch (error) {
+            console.error('Error al recuperar la plantilla de Firebase:', error);
+        }
+    }
+    return null;
+}
+
 client.on('ready', async () => {
     console.log(`Hemos iniciado sesión como ${client.user.tag}`);
 
@@ -198,6 +220,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     return;
                 }
                 
+                // CÓDIGO ANTERIOR: Eliminada la restricción de hilo bloqueado
                 const hilo = interaction.channel;
                 const mensajePrincipal = await hilo.fetchStarterMessage();
 
@@ -225,7 +248,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 const numeroPuesto = parseInt(lineas[lineaEncontrada].trim().split('.')[0]);
                 
-                const originalContent = originalCompoContent.get(mensajePrincipal.id);
+                const originalContent = await getOriginalContent(mensajePrincipal.id, hilo);
                 if (!originalContent) {
                     await interaction.editReply('Error: No se pudo encontrar la plantilla original para restaurar el puesto.');
                     return;
@@ -256,7 +279,8 @@ client.on(Events.InteractionCreate, async interaction => {
                     await interaction.editReply('Este comando solo se puede usar dentro de un hilo de party.');
                     return;
                 }
-                
+
+                // CÓDIGO ANTERIOR: Eliminada la restricción de hilo bloqueado
                 const hilo = interaction.channel;
                 const usuarioAAgregar = interaction.options.getUser('usuario');
                 const puestoAAgregar = interaction.options.getInteger('puesto');
@@ -269,7 +293,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 
                 let lineas = mensajePrincipal.content.split('\n');
                 
-                const originalContent = originalCompoContent.get(mensajePrincipal.id);
+                const originalContent = await getOriginalContent(mensajePrincipal.id, hilo);
                 if (!originalContent) {
                     await interaction.editReply('Error: No se pudo encontrar la plantilla original para esta party.');
                     return;
@@ -383,8 +407,14 @@ client.on(Events.InteractionCreate, async interaction => {
                     await interaction.reply({ content: 'Este comando solo se puede usar dentro de un hilo de party.', flags: [MessageFlags.Ephemeral] });
                     return;
                 }
+                
+                const hilo = interaction.channel;
+                if (hilo.locked) {
+                    await interaction.reply({ content: '❌ Las inscripciones han finalizado. No se puede editar el mensaje.', flags: [MessageFlags.Ephemeral] });
+                    return;
+                }
 
-                const mensajePrincipal = await interaction.channel.fetchStarterMessage();
+                const mensajePrincipal = await hilo.fetchStarterMessage();
                 if (!mensajePrincipal) {
                     await interaction.reply({ content: 'No se pudo encontrar el mensaje principal de la party.', flags: [MessageFlags.Ephemeral] });
                     return;
@@ -550,7 +580,7 @@ client.on(Events.InteractionCreate, async interaction => {
                         return;
                     }
                     
-                    const originalContent = originalCompoContent.get(mensajePrincipal.id);
+                    const originalContent = await getOriginalContent(mensajePrincipal.id, message.channel);
                     if (!originalContent) {
                         await interaction.editReply('Error: No se pudo encontrar la plantilla original para restaurar el puesto.');
                         return;
@@ -653,6 +683,17 @@ ${compoContent}`;
 
                     const mensajePrincipal = await interaction.channel.send({ content: mensajeCompleto });
                     
+                    if (db) {
+                        try {
+                            const docRef = doc(db, 'live_parties', mensajePrincipal.id);
+                            await setDoc(docRef, {
+                                originalContent: compoContent,
+                                threadId: mensajePrincipal.channel.id
+                            });
+                        } catch (error) {
+                            console.error('Error al guardar la plantilla en Firebase:', error);
+                        }
+                    }
                     originalCompoContent.set(mensajePrincipal.id, compoContent);
 
                     const hilo = await mensajePrincipal.startThread({
@@ -671,6 +712,15 @@ ${compoContent}`;
                                 if (canalHilo && !canalHilo.archived && !canalHilo.locked) {
                                     await canalHilo.setLocked(true);
                                     await canalHilo.send('¡Las inscripciones han terminado! Este hilo ha sido bloqueado y ya no se pueden añadir más participantes.');
+                                    
+                                    if (db) {
+                                        try {
+                                            await deleteDoc(doc(db, 'live_parties', mensajePrincipal.id));
+                                            originalCompoContent.delete(mensajePrincipal.id);
+                                        } catch (error) {
+                                            console.error('Error al eliminar la plantilla de Firebase:', error);
+                                        }
+                                    }
                                 } else {
                                     console.log(`El hilo ${hilo.id} ya no existe, está archivado o ya está bloqueado. No se puede bloquear.`);
                                 }
@@ -777,7 +827,7 @@ client.on(Events.MessageCreate, async message => {
                 return;
             }
             
-            const originalContent = originalCompoContent.get(mensajePrincipal.id);
+            const originalContent = await getOriginalContent(mensajePrincipal.id, message.channel);
             if (!originalContent) {
                 await message.delete().catch(() => {});
                 const mensajeError = await channel.send('Error: No se pudo encontrar la plantilla original para restaurar el puesto.');
@@ -836,7 +886,7 @@ client.on(Events.MessageCreate, async message => {
             const oldLine = lineas[oldSpotIndex];
             const oldSpot = parseInt(oldLine.trim().split('.')[0]);
             
-            const originalContent = originalCompoContent.get(mensajePrincipal.id);
+            const originalContent = await getOriginalContent(mensajePrincipal.id, message.channel);
             if (originalContent) {
                 const originalLines = originalContent.split('\n');
                 const originalLineForSpot = originalLines.find(linea => linea.startsWith(`${oldSpot}.`));
@@ -864,46 +914,4 @@ client.on(Events.MessageCreate, async message => {
     
         if (indiceLinea !== -1) {
             if (lineas[indiceLinea].includes('<@')) {
-                const mensajeOcupado = await channel.send(`<@${author.id}>, ese puesto ya está ocupado. Intenta con otro número.`);
-                setTimeout(() => mensajeOcupado.delete().catch(() => {}), 10000);
-                return;
-            }
-            
-            const lineaOriginal = lineas[indiceLinea];
-            const components = mensajePrincipal.components;
-
-            if (lineaOriginal.includes('. X')) {
-                const preguntaRol = await channel.send(`<@${author.id}>, te has apuntado en el puesto **${numero}**. ¿Qué rol vas a ir?`);
-                
-                const filtro = m => m.author.id === author.id;
-                const colector = channel.createMessageCollector({ filter: filtro, max: 1, time: 60000 });
-
-                colector.on('collect', async m => {
-                    await preguntaRol.delete().catch(() => {});
-                    await m.delete().catch(() => {});
-                    const rol = m.content;
-                    const nuevoValor = `${numero}. ${rol} <@${author.id}>`;
-                    lineas[indiceLinea] = nuevoValor;
-                    await mensajePrincipal.edit({ content: lineas.join('\n'), components });
-                    await channel.send(`<@${author.id}>, te has apuntado en el puesto **${numero}** como **${rol}**.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
-                });
-
-                colector.on('end', collected => {
-                    if (collected.size === 0) {
-                        channel.send(`<@${author.id}>, no respondiste a tiempo. Por favor, vuelve a intentarlo.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
-                    }
-                });
-            } else {
-                const nuevoValor = `${lineaOriginal} <@${author.id}>`;
-                lineas[indiceLinea] = nuevoValor;
-                await mensajePrincipal.edit({ content: lineas.join('\n'), components });
-                await channel.send(`<@${author.id}>, te has apuntado en el puesto **${numero}** con éxito.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
-            }
-        }
-    } catch (error) {
-        console.error('Error procesando mensaje en el hilo:', error);
-        channel.send(`Hubo un error al procesar tu solicitud, <@${author.id}>. Por favor, inténtalo de nuevo.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
-    }
-});
-
-client.login(process.env.TOKEN);
+                const mensajeOcupado = await channel.send(`<@${
