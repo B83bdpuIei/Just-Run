@@ -50,7 +50,7 @@ const firebaseConfig = {
 };
 // =======================================================
 
-// AÑADIDO: Mapa para almacenar el contenido original de las compos
+// AÑADIDO: Mapa para almacenar el contenido original de las compos por ID de mensaje principal
 const originalCompoContent = new Map();
 
 client.on('ready', async () => {
@@ -201,7 +201,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     await interaction.editReply('Este comando solo se puede usar dentro de un hilo de party.');
                     return;
                 }
-                
+                
                 const hilo = interaction.channel;
                 const mensajePrincipal = await hilo.fetchStarterMessage();
 
@@ -229,7 +229,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 const numeroPuesto = parseInt(lineas[lineaEncontrada].trim().split('.')[0]);
                 
-                // CAMBIO AQUÍ: Usar el contenido original de la plantilla para restaurar la línea
+                // CAMBIO: Usar el contenido original de la plantilla para restaurar la línea
                 const originalContent = originalCompoContent.get(mensajePrincipal.id);
                 if (!originalContent) {
                     await interaction.editReply('Error: No se pudo encontrar la plantilla original para restaurar el puesto.');
@@ -240,7 +240,6 @@ client.on(Events.InteractionCreate, async interaction => {
                 const originalLineForSpot = originalLines.find(linea => linea.startsWith(`${numeroPuesto}.`));
 
                 if (originalLineForSpot) {
-                    // Encontrar el inicio de la lista de roles
                     const inicioPartyIndex = lineas.findIndex(linea => linea.startsWith('1.'));
                     if (inicioPartyIndex !== -1) {
                         const offset = lineaEncontrada - inicioPartyIndex;
@@ -538,6 +537,226 @@ client.on(Events.InteractionCreate, async interaction => {
             
             modal.addComponents(new ActionRowBuilder().addComponents(valorInput));
             await interaction.showModal(modal);
+        }
+    } else if (interaction.isButton()) {
+        if (interaction.customId === 'desapuntarme_button') {
+            await interaction.deferReply({ ephemeral: true });
+
+            const message = interaction.message;
+            const user = interaction.user;
+
+            if (!message.channel.isThread()) {
+                await interaction.editReply('Este botón solo funciona en un hilo de party.');
+                return;
+            }
+
+            const mensajePrincipal = await message.channel.fetchStarterMessage();
+            if (!mensajePrincipal) {
+                await interaction.editReply('No se pudo encontrar el mensaje principal de la party. Inténtalo de nuevo.');
+                return;
+            }
+            
+            try {
+                let lineas = mensajePrincipal.content.split('\n');
+                let oldSpotIndex = -1;
+
+                for (const [index, linea] of lineas.entries()) {
+                    if (linea.includes(`<@${user.id}>`)) {
+                        oldSpotIndex = index;
+                        break;
+                    }
+                }
+                
+                if (oldSpotIndex === -1) {
+                    await interaction.editReply('No estás apuntado en esta party.');
+                    return;
+                }
+
+                const oldLine = lineas[oldSpotIndex];
+                const oldSpot = parseInt(oldLine.trim().split('.')[0]);
+                
+                // CAMBIO: Usar el contenido original para restaurar la línea
+                const originalContent = originalCompoContent.get(mensajePrincipal.id);
+                if (!originalContent) {
+                    await interaction.editReply('Error: No se pudo encontrar la plantilla original para restaurar el puesto.');
+                    return;
+                }
+                const originalLines = originalContent.split('\n');
+                const originalLineForSpot = originalLines.find(linea => linea.startsWith(`${oldSpot}.`));
+
+                if (originalLineForSpot) {
+                    const inicioPartyIndex = lineas.findIndex(linea => linea.startsWith('1.'));
+                    if (inicioPartyIndex !== -1) {
+                        const offset = oldSpotIndex - inicioPartyIndex;
+                        lineas[oldSpotIndex] = originalLines[offset];
+                    } else {
+                        lineas[oldSpotIndex] = originalLineForSpot;
+                    }
+                } else {
+                    const regexClean = new RegExp(`(<@${user.id}>)`);
+                    lineas[oldSpotIndex] = oldLine.replace(regexClean, '').trim();
+                }
+
+                await mensajePrincipal.edit({ content: lineas.join('\n') });
+                
+                await interaction.editReply(`✅ Te has desapuntado del puesto **${oldSpot}**.`);
+            } catch (error) {
+                console.error('Error procesando el botón de desapuntar:', error);
+                await interaction.editReply('Hubo un error al intentar desapuntarte. Por favor, inténtalo de nuevo.');
+            }
+        }
+    } else if (interaction.type === InteractionType.ModalSubmit) {
+        if (interaction.customId === 'add_compo_modal') {
+            const compoName = interaction.fields.getTextInputValue('compo_name');
+            const compoContent = interaction.fields.getTextInputValue('compo_content');
+            
+            if (!db) {
+                await interaction.reply({ content: 'Error: La base de datos no está disponible.', flags: [MessageFlags.Ephemeral] });
+                return;
+            }
+
+            try {
+                await addDoc(composCollectionRef, {
+                    name: compoName,
+                    content: compoContent
+                });
+                await interaction.reply({ content: `✅ El template de party **${compoName}** ha sido guardado.`, flags: [MessageFlags.Ephemeral] });
+            } catch (error) {
+                console.error('Error al guardar el template de party:', error);
+                await interaction.reply({ content: 'Hubo un error al guardar el template.', flags: [MessageFlags.Ephemeral] });
+            }
+            return;
+        }
+
+        if (interaction.customId.startsWith('start_comp_modal_')) {
+            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
+            const compoId = interaction.customId.split('_')[3];
+
+            if (!db) {
+                await interaction.editReply('Error: La base de datos no está disponible.');
+                return;
+            }
+
+            try {
+                const composSnapshot = await getDocs(composCollectionRef);
+                const selectedCompo = composSnapshot.docs.find(doc => doc.id === compoId);
+                if (!selectedCompo) {
+                    await interaction.editReply('Error: El template de party no fue encontrado.');
+                    return;
+                }
+                const compoContent = selectedCompo.data().content;
+
+                const horaMasseo = interaction.fields.getTextInputValue('hora_masseo');
+                const tiempoFinalizacionStr = interaction.fields.getTextInputValue('tiempo_finalizacion');
+                const mensajeEncabezado = interaction.fields.getTextInputValue('mensaje_encabezado');
+
+                let totalMilisegundos = 0;
+                const regexHoras = /(\d+)\s*h/;
+                const regexMinutos = /(\d+)\s*m/;
+
+                const matchHoras = tiempoFinalizacionStr.match(regexHoras);
+                const matchMinutos = tiempoFinalizacionStr.match(regexMinutos);
+
+                if (matchHoras) {
+                    totalMilisegundos += parseInt(matchHoras[1]) * 60 * 60 * 1000;
+                }
+                if (matchMinutos) {
+                    totalMilisegundos += parseInt(matchMinutos[1]) * 60 * 1000;
+                }
+
+                const fechaFinalizacion = Math.floor((Date.now() + totalMilisegundos) / 1000);
+
+                const mensajeCompleto = `${horaMasseo}
+${mensajeEncabezado || ''}
+
+**INSCRIPCIONES TERMINAN:** <t:${fechaFinalizacion}:R>
+
+${compoContent}`;
+
+                // Creamos el botón "Desapuntarme"
+                const desapuntarmeButton = new ButtonBuilder()
+                    .setCustomId('desapuntarme_button')
+                    .setLabel('❌ Desapuntarme')
+                    .setStyle(ButtonStyle.Danger);
+
+                const buttonRow = new ActionRowBuilder().addComponents(desapuntarmeButton);
+
+                // Enviamos el mensaje principal y el hilo se crea a partir de él.
+                const mensajePrincipal = await interaction.channel.send({ content: mensajeCompleto });
+                
+                // AÑADIDO: Guardar el contenido original de la plantilla en el Map
+                originalCompoContent.set(mensajePrincipal.id, compoContent);
+
+                const hilo = await mensajePrincipal.startThread({
+                    name: "Inscripción de la party",
+                    autoArchiveDuration: 60,
+                });
+                
+                // En lugar de enviar el botón en el mensaje principal, lo enviamos en el hilo.
+                await hilo.send({ content: "¡Escribe un número para apuntarte!", components: [buttonRow] });
+
+                if (totalMilisegundos > 0) {
+                    await hilo.send(`El hilo se bloqueará automáticamente en **${tiempoFinalizacionStr}**.`);
+                    
+                    setTimeout(async () => {
+                        try {
+                            const canalHilo = await client.channels.fetch(hilo.id);
+                            if (canalHilo && !canalHilo.archived && !canalHilo.locked) {
+                                await canalHilo.setLocked(true);
+                                await canalHilo.send('¡Las inscripciones han terminado! Este hilo ha sido bloqueado y ya no se pueden añadir más participantes.');
+                            } else {
+                                console.log(`El hilo ${hilo.id} ya no existe, está archivado o ya está bloqueado. No se puede bloquear.`);
+                            }
+                        } catch (error) {
+                            console.error(`Error al bloquear el hilo ${hilo.id}:`, error);
+                        }
+                    }, totalMilisegundos);
+                }
+
+                await interaction.editReply({ content: `✅ La party se ha iniciado correctamente. Puedes verla en <#${hilo.id}>.`, flags: [MessageFlags.Ephemeral] });
+
+            } catch (error) {
+                console.error('Error al crear la party o el hilo:', error);
+                await interaction.editReply({ content: 'Hubo un error al intentar crear la party. Por favor, asegúrate de que el bot tenga los permisos necesarios.', flags: [MessageFlags.Ephemeral] });
+            }
+        } else if (interaction.customId.startsWith('edit_comp_modal_')) {
+            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
+            const partes = interaction.customId.split('_');
+            const mensajePrincipalId = partes[3];
+            const campoAEditar = partes[4];
+            const nuevoValor = interaction.fields.getTextInputValue('nuevo_valor');
+
+            try {
+                const mensajePrincipal = await interaction.channel.messages.fetch(mensajePrincipalId);
+                if (!mensajePrincipal) {
+                    await interaction.editReply('No se pudo encontrar el mensaje a editar.');
+                    return;
+                }
+                
+                let lineas = mensajePrincipal.content.split('\n');
+                
+                if (campoAEditar === 'hora') {
+                    lineas[0] = nuevoValor;
+                } else if (campoAEditar === 'encabezado') {
+                    // Encontrar el final de la hora y el inicio de las inscripciones para reemplazar el encabezado
+                    const finalHoraIndex = 0;
+                    const inicioInscripcionesIndex = lineas.findIndex(linea => linea.startsWith('**INSCRIPCIONES TERMINAN:**'));
+
+                    if (inicioInscripcionesIndex > finalHoraIndex + 1) {
+                        lineas.splice(finalHoraIndex + 1, inicioInscripcionesIndex - (finalHoraIndex + 1), nuevoValor);
+                    } else if (nuevoValor) {
+                        lineas.splice(finalHoraIndex + 1, 0, nuevoValor);
+                    }
+                }
+                
+                await mensajePrincipal.edit(lineas.join('\n'));
+                await interaction.editReply(`✅ Se ha actualizado la **${campoAEditar}** del mensaje principal.`);
+            } catch (error) {
+                console.error('Error al editar el mensaje de la compo:', error);
+                await interaction.editReply('Hubo un error al intentar editar el mensaje.');
+            }
         }
     } else if (interaction.isButton()) {
         if (interaction.customId === 'desapuntarme_button') {
