@@ -1121,3 +1121,17 @@ client.on(Events.MessageCreate, async message => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+// ... todo tu código anterior ...
+
+// --- Líneas de Depuración (Añade esto) ---
+console.log('--- VERIFICANDO TOKEN ANTES DE LOGIN ---');
+const token = process.env.TOKEN;
+if (token) {
+    console.log(`Token encontrado. Longitud: ${token.length}. Inicio: '${token.substring(0, 5)}...'. Final: '...${token.substring(token.length - 5)}'.`);
+} else {
+    console.log('¡ERROR! La variable process.env.TOKEN está vacía o no existe.');
+}
+console.log('------------------------------------');
+// --- Fin de las líneas de depuración ---
+
+client.login(process.env.TOKEN);
