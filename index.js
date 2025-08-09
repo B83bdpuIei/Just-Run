@@ -1,7 +1,5 @@
 import { Client, GatewayIntentBits, Events, REST, Routes, SlashCommandBuilder, ChannelType } from 'discord.js';
 
-// Ya no necesitamos 'dotenv', lo hemos eliminado.
-
 // =================================================================================
 // CONFIGURACIÓN DEL CLIENTE Y COMANDOS
 // =================================================================================
@@ -14,9 +12,8 @@ const client = new Client({
     ],
 });
 
-// El token y otros secretos se leen de 'process.env', que Render configura automáticamente
-// con las variables que has añadido en su panel.
-const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+// CAMBIO: Ahora usa process.env.TOKEN para coincidir con tu configuración en Render.
+const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
 
 const partyCommand = new SlashCommandBuilder()
     .setName('party')
@@ -37,6 +34,7 @@ const partyCommand = new SlashCommandBuilder()
 (async () => {
     try {
         console.log('Refrescando comandos de aplicación (/).');
+        // Asegúrate de tener las variables CLIENT_ID y GUILD_ID en Render también.
         await rest.put(
             Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
             { body: [partyCommand.toJSON()] },
@@ -93,7 +91,6 @@ client.once(Events.ClientReady, () => {
     console.log(`Bot listo! Logueado como ${client.user.tag}`);
 });
 
-// --- GESTIÓN DEL COMANDO /party ---
 client.on(Events.InteractionCreate, async interaction => {
     if (!interaction.isCommand() || interaction.commandName !== 'party') return;
 
@@ -137,7 +134,6 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 });
 
-// --- GESTIÓN DE MENSAJES EN HILOS (APUNTARSE / DESAPUNTARSE) ---
 client.on(Events.MessageCreate, async message => {
     if (message.author.bot || !message.channel.isThread()) return;
 
@@ -214,4 +210,5 @@ client.on(Events.MessageCreate, async message => {
     }
 });
 
-client.login(process.env.DISCORD_TOKEN);
+// CAMBIO: Ahora usa process.env.TOKEN para coincidir con tu configuración en Render.
+client.login(process.env.TOKEN);
