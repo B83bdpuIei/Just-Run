@@ -1,7 +1,29 @@
 import { Client, GatewayIntentBits, Events, REST, Routes, SlashCommandBuilder, ChannelType } from 'discord.js';
+import express from 'express';
 
 // =================================================================================
-// CONFIGURACIÓN DEL CLIENTE Y COMANDOS
+// SECCIÓN DEL SERVIDOR WEB (¡NUEVO!)
+// =================================================================================
+
+// Crea una aplicación de Express
+const app = express();
+// Render te proporcionará el puerto a través de una variable de entorno
+const port = process.env.PORT || 3000;
+
+// Esta es la "página principal" de tu servidor.
+// Render la usará para comprobar que tu bot está vivo.
+app.get('/', (req, res) => {
+  res.send('El bot está vivo y funcionando.');
+});
+
+// Ponemos el servidor a escuchar en el puerto que nos da Render
+app.listen(port, () => {
+  console.log(`Servidor web escuchando en el puerto ${port}`);
+});
+
+
+// =================================================================================
+// CÓDIGO DE TU BOT (SIN CAMBIOS)
 // =================================================================================
 
 const client = new Client({
@@ -12,7 +34,7 @@ const client = new Client({
     ],
 });
 
-// CAMBIO: Ahora usa process.env.TOKEN para coincidir con tu configuración en Render.
+// Esta línea lee el token de las variables de entorno de Render
 const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
 
 const partyCommand = new SlashCommandBuilder()
@@ -34,20 +56,15 @@ const partyCommand = new SlashCommandBuilder()
 (async () => {
     try {
         console.log('Refrescando comandos de aplicación (/).');
-        // Asegúrate de tener las variables CLIENT_ID y GUILD_ID en Render también.
         await rest.put(
             Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
             { body: [partyCommand.toJSON()] },
         );
         console.log('Comandos de aplicación recargados correctamente.');
     } catch (error) {
-        console.error(error);
+        console.error("Error al refrescar comandos:", error);
     }
 })();
-
-// =================================================================================
-// FUNCIONES DE AYUDA Y CACHÉ PARA LAS PARTIES
-// =================================================================================
 
 const originalPartyMessages = new Map();
 
@@ -82,10 +99,6 @@ async function clearUserSpot(lines, authorId, messageId) {
     lines[oldSpotIndex] = lines[oldSpotIndex].replace(new RegExp(`\\s*<@${authorId}>`), '').trim();
     return { success: true, oldSpot };
 }
-
-// =================================================================================
-// EVENTOS DEL BOT
-// =================================================================================
 
 client.once(Events.ClientReady, () => {
     console.log(`Bot listo! Logueado como ${client.user.tag}`);
@@ -210,5 +223,5 @@ client.on(Events.MessageCreate, async message => {
     }
 });
 
-// CAMBIO: Ahora usa process.env.TOKEN para coincidir con tu configuración en Render.
+// Esta línea lee el token de las variables de entorno de Render
 client.login(process.env.TOKEN);
