@@ -37,22 +37,23 @@ app.listen(port, () => {
 let db;
 let composCollectionRef;
 let warnsCollectionRef;
-let warnsChannelId = 'REEMPLAZAR_CON_ID_DEL_CANAL_DE_WARNS'; // Reemplaza con el ID de tu canal de warns
-let warnsMessageId = 'REEMPLAZAR_CON_ID_DEL_MENSAJE_DE_WARNS'; // Reemplaza con el ID del mensaje inicial
+// !! IMPORTANTE: Reemplaza estos valores con los IDs reales de tu servidor !!
+let warnsChannelId = 'REEMPLAZAR_CON_ID_DEL_CANAL_DE_WARNS';
+let warnsMessageId = 'REEMPLAZAR_CON_ID_DEL_MENSAJE_DE_WARNS';
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
-// === CONFIGURACIÓN DE FIRESTORE: AÑADE TU OBJETO AQUÍ ===
+// === CONFIGURACIÓN SEGURA DE FIRESTORE DESDE VARIABLES DE ENTORNO ===
 const firebaseConfig = {
-    apiKey: "AIzaSyCaPKwXut-_NA0se1WPgpNltWNWU1RSVgQ",
-    authDomain: "just-run-af870.firebaseapp.com",
-    projectId: "just-run-af870",
-    storageBucket: "just-run-af870.firebasestorage.app",
-    messagingSenderId: "834384222332",
-    appId: "1:834384222332:web:ed7bbb45baf0e80b2711f9",
-    measurementId: "G-8YF78WQ4BQ"
+    apiKey: process.env.FIREBASE_API_KEY,
+    authDomain: process.env.FIREBASE_AUTH_DOMAIN,
+    projectId: process.env.FIREBASE_PROJECT_ID,
+    storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
+    appId: process.env.FIREBASE_APP_ID,
+    measurementId: process.env.FIREBASE_MEASUREMENT_ID
 };
-// =======================================================
+// ===================================================================
 
 const originalCompoContent = new Map();
 
@@ -1120,3 +1121,17 @@ client.on(Events.MessageCreate, async message => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+// ... todo tu código anterior ...
+
+// --- Líneas de Depuración (Añade esto) ---
+console.log('--- VERIFICANDO TOKEN ANTES DE LOGIN ---');
+const token = process.env.TOKEN;
+if (token) {
+    console.log(`Token encontrado. Longitud: ${token.length}. Inicio: '${token.substring(0, 5)}...'. Final: '...${token.substring(token.length - 5)}'.`);
+} else {
+    console.log('¡ERROR! La variable process.env.TOKEN está vacía o no existe.');
+}
+console.log('------------------------------------');
+// --- Fin de las líneas de depuración ---
+
+client.login(process.env.TOKEN);
