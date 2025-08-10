@@ -141,6 +141,7 @@ client.on('ready', async () => {
     console.log(`Hemos iniciado sesión como ${client.user.tag}`);
 
     try {
+        console.log(`Verificando APP_ID para Firestore: ${appId}`);
         const firebaseApp = initializeApp(firebaseConfig);
         db = getFirestore(firebaseApp);
         composCollectionRef = collection(db, `artifacts/${appId}/public/data/compos`);
@@ -525,7 +526,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 const row = new ActionRowBuilder().addComponents(selectMenu);
                 await interaction.reply({ content: 'Selecciona lo que quieres editar:', components: [row], flags: [MessageFlags.Ephemeral] });
             } else if (commandName === 'warn') {
-                await interaction.deferReply({ ephemeral: true });
+                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
                 if (!db) {
                     return interaction.editReply('Error: La base de datos no está disponible.');
@@ -555,7 +556,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     await interaction.editReply('Hubo un error al añadir el warn. Por favor, inténtalo de nuevo.');
                 }
             } else if (commandName === 'remove-warn') {
-                await interaction.deferReply({ ephemeral: true });
+                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
                 if (!db) {
                     return interaction.editReply('Error: La base de datos no está disponible.');
@@ -586,7 +587,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     await interaction.editReply('Hubo un error al eliminar el warn. Por favor, inténtalo de nuevo.');
                 }
             } else if (commandName === 'warn-list') {
-                await interaction.deferReply({ ephemeral: true });
+                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
                 if (!db) {
                     return interaction.editReply('Error: La base de datos no está disponible.');
@@ -731,7 +732,7 @@ client.on(Events.InteractionCreate, async interaction => {
             }
         } else if (interaction.isButton()) {
             if (interaction.customId === 'desapuntarme_button') {
-                await interaction.deferReply({ ephemeral: true });
+                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
                 const message = interaction.message;
                 const user = interaction.user;
@@ -961,7 +962,7 @@ ${compoContent}`;
     } catch (error) {
         console.error('Error no controlado en InteractionCreate:', error);
         if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
-            await interaction.reply({ content: 'Ocurrió un error inesperado. Por favor, inténtalo de nuevo.', ephemeral: true }).catch(() => {});
+            await interaction.reply({ content: 'Ocurrió un error inesperado. Por favor, inténtalo de nuevo.', flags: [MessageFlags.Ephemeral] }).catch(() => {});
         }
     }
 });
