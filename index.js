@@ -38,12 +38,10 @@ let db;
 let composCollectionRef;
 let warnsCollectionRef;
 
-// !! IMPORTANTE: REEMPLAZA ESTOS VALORES CON LOS IDs REALES DE TU SERVIDOR !!
-// Puedes obtener el ID de un canal y un mensaje haciendo clic derecho con el Modo Desarrollador activado en Discord.
+// !! IMPORTANTE: REEMPLAZA ESTOS VALORES CON LOS IDs REALES DE TU SERVIDOR Y MENSAJE !!
 let serverId = 'TU_ID_DE_SERVIDOR';
 let warnsChannelId = '1403848025838718996';
-let warnsMessageId = 'TU_ID_DE_MENSAJE_DE_WARNS';
-
+let warnsMessageId = 'TU_ID_DE_MENSAJE_DE_WARNS'; // <--- DEBES REEMPLAZAR ESTE VALOR
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
@@ -85,7 +83,7 @@ async function getOriginalContent(messageId, hilo) {
 
 // Función para actualizar el mensaje de la lista de warns
 async function updateWarnListMessage() {
-    if (!db || !warnsChannelId || !warnsMessageId) {
+    if (!db || !warnsChannelId || !warnsMessageId || warnsMessageId === 'TU_ID_DE_MENSAJE_DE_WARNS') {
         console.error('Falta la configuración de Firebase o del canal/mensaje de warns. No se puede actualizar la lista.');
         return;
     }
@@ -100,7 +98,7 @@ async function updateWarnListMessage() {
 
         const warnsMessage = await warnsChannel.messages.fetch(warnsMessageId);
         if (!warnsMessage) {
-            console.error('No se pudo encontrar el mensaje de warns.');
+            console.error('No se pudo encontrar el mensaje de warns. Asegúrate de que el ID del mensaje estático sea correcto.');
             return;
         }
 
@@ -109,30 +107,38 @@ async function updateWarnListMessage() {
             const userId = doc.id;
             const userWarnsQuery = await getDocs(collection(db, 'warns', userId, 'list'));
             const warnsCount = userWarnsQuery.size;
+            if (warnsCount === 0) {
+                // Si el usuario no tiene warns, borramos su documento de la colección 'warns'
+                await deleteDoc(doc(db, 'warns', userId)).catch(err => console.error(`Error al eliminar documento de warns para ${userId}:`, err));
+                return null;
+            }
             return { userId, warnsCount };
         }));
 
-        const validWarnedUsers = allWarnedUsers.filter(u => u.warnsCount > 0);
+        const validWarnedUsers = allWarnedUsers.filter(u => u !== null);
 
-        let warnListContent = `***__WARN LIST__***\n\n`;
-
-        for (const userEntry of validWarnedUsers) {
-            const member = await guild.members.fetch(userEntry.userId).catch(() => null);
-            const username = member ? member.user.tag : `<@${userEntry.userId}>`;
-
-            const userWarnsQuery = await getDocs(collection(db, 'warns', userEntry.userId, 'list'));
-            const warns = userWarnsQuery.docs.map(doc => doc.data());
-            
-            warnListContent += `**<@${userEntry.userId}>** **${warns.length}/3**\n`;
-            
-            warns.forEach((warn, index) => {
-                warnListContent += `${index + 1}. - ${warn.motivo}\n`;
-            });
-            warnListContent += '\n';
-        }
+        let warnListContent = `## :041: WARN LIST\n\n`;
+        const separator = `:Mels_blackline:`.repeat(11) + '\n';
+        warnListContent += separator;
 
         if (validWarnedUsers.length === 0) {
             warnListContent += 'No hay usuarios con warns actualmente.';
+        } else {
+            for (const userEntry of validWarnedUsers) {
+                const member = await guild.members.fetch(userEntry.userId).catch(() => null);
+                const username = member ? member.user.tag : `<@${userEntry.userId}>`;
+
+                const userWarnsQuery = await getDocs(collection(db, 'warns', userEntry.userId, 'list'));
+                const warns = userWarnsQuery.docs.map(doc => doc.data());
+                
+                warnListContent += `:Communityowner: **<@${userEntry.userId}>** **(${warns.length}/3)**\n`;
+                
+                warns.forEach((warn, index) => {
+                    const warnEmoji = index === 0 ? ':7SNHD_Number1:' : index === 1 ? ':7SNHD_Number2:' : ':7SNHD_Number3:';
+                    warnListContent += `${warnEmoji} ${warn.motivo}\n`;
+                });
+                warnListContent += separator;
+            }
         }
 
         await warnsMessage.edit(warnListContent);
@@ -163,7 +169,7 @@ client.on('ready', async () => {
 
     const commands = [
         new SlashCommandBuilder()
-            .setName('start_comp')
+            .setName('start-party')
             .setDescription('Inicia una nueva inscripción de party con un template.')
             .setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads),
         new SlashCommandBuilder()
@@ -222,14 +228,6 @@ client.on('ready', async () => {
                     .setDescription('El número del warn a eliminar.')
                     .setRequired(true))
             .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
-        new SlashCommandBuilder()
-            .setName('warn-list')
-            .setDescription('Muestra la lista de warns de un usuario.')
-            .addUserOption(option =>
-                option.setName('usuario')
-                    .setDescription('El usuario para ver sus warns.')
-                    .setRequired(true))
-            .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
     ];
 
     try {
@@ -258,7 +256,7 @@ client.on(Events.InteractionCreate, async interaction => {
         if (interaction.isChatInputCommand()) {
             const { commandName } = interaction;
             
-            if (commandName === 'start_comp') {
+            if (commandName === 'start-party') {
                 if (interaction.channel.isThread()) {
                     await interaction.reply({ content: 'Este comando solo se puede usar en un canal de texto normal, no en un hilo.', flags: [MessageFlags.Ephemeral] });
                     return;
@@ -593,36 +591,6 @@ client.on(Events.InteractionCreate, async interaction => {
                 } catch (error) {
                     console.error('Error al eliminar warn:', error);
                     await interaction.editReply('Hubo un error al eliminar el warn. Por favor, inténtalo de nuevo.');
-                }
-            } else if (commandName === 'warn-list') {
-                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-
-                if (!db) {
-                    return interaction.editReply('Error: La base de datos no está disponible.');
-                }
-                
-                const usuario = interaction.options.getUser('usuario');
-
-                try {
-                    const userWarnsQuery = await getDocs(collection(db, 'warns', usuario.id, 'list'));
-                    const warns = userWarnsQuery.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    
-                    if (warns.length === 0) {
-                        return interaction.editReply(`✅ <@${usuario.id}> no tiene warns.`);
-                    }
-
-                    let warnListText = `**Lista de Warns de <@${usuario.id}> (${warns.length} warns):**\n\n`;
-                    
-                    warns.forEach((warn, index) => {
-                        const moderador = interaction.guild.members.cache.get(warn.moderador) || { displayName: 'Desconocido' };
-                        const fecha = new Date(warn.fecha).toLocaleDateString('es-ES', { timeZone: 'UTC' });
-                        warnListText += `${index + 1}. **Motivo:** ${warn.motivo}\n  **Moderador:** ${moderador.displayName}\n  **Fecha:** ${fecha}\n\n`;
-                    });
-                    
-                    await interaction.editReply(codeBlock(warnListText));
-                } catch (error) {
-                    console.error('Error al obtener la lista de warns:', error);
-                    await interaction.editReply('Hubo un error al obtener la lista de warns. Por favor, inténtalo de nuevo.');
                 }
             }
         } else if (interaction.isStringSelectMenu()) {
