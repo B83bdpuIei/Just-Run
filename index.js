@@ -38,10 +38,10 @@ let db;
 let composCollectionRef;
 let warnsCollectionRef;
 
-// !! IMPORTANTE: REEMPLAZA ESTOS VALORES CON LOS IDs REALES DE TU SERVIDOR Y MENSAJE !!
-let serverId = '1236309698131787816'; // <--- ESTE VALOR HA SIDO ACTUALIZADO
+// !! IMPORTANTE: REEMPLAZA ESTOS VALORES CON LOS IDs REALES DE TU SERVIDOR Y CANAL !!
+let serverId = '1236309698131787816'; 
 let warnsChannelId = '1403848025838718996';
-let warnsMessageId = '1404010670806138941';
+let warnsMessageId = ''; // Deja este valor vacío. El bot lo llenará automáticamente.
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
@@ -60,10 +60,10 @@ const firebaseConfig = {
 const originalCompoContent = new Map();
 
 /**
- * Retrieves the original content template for a specific message from a local cache or Firestore.
- * @param {string} messageId The ID of the message to retrieve the content for.
- * @returns {Promise<string|null>} The original content as a string, or null if not found.
- */
+ * Retrieves the original content template for a specific message from a local cache or Firestore.
+ * @param {string} messageId The ID of the message to retrieve the content for.
+ * @returns {Promise<string|null>} The original content as a string, or null if not found.
+ */
 async function getOriginalContent(messageId) {
     if (originalCompoContent.has(messageId)) {
         return originalCompoContent.get(messageId);
@@ -87,15 +87,16 @@ async function getOriginalContent(messageId) {
 }
 
 /**
- * Updates the static warn list message in the designated channel.
- * @returns {Promise<void>}
- */
+ * Updates the static warn list message in the designated channel.
+ * If the message doesn't exist, it creates it.
+ * @returns {Promise<void>}
+ */
 async function updateWarnListMessage() {
-    if (!db || !warnsChannelId || !warnsMessageId || warnsMessageId === 'TU_ID_DE_MENSAJE_DE_WARNS') {
-        console.error('Falta la configuración de Firebase o del canal/mensaje de warns. No se puede actualizar la lista.');
+    if (!db || !warnsChannelId) {
+        console.error('Falta la configuración de Firebase o del canal de warns. No se puede actualizar la lista.');
         return;
     }
-    
+
     try {
         const guild = await client.guilds.fetch(serverId);
         const warnsChannel = await guild.channels.fetch(warnsChannelId);
@@ -104,15 +105,17 @@ async function updateWarnListMessage() {
             return;
         }
 
-        const warnsMessage = await warnsChannel.messages.fetch(warnsMessageId).catch(() => null);
+        let warnsMessage;
+        if (warnsMessageId) {
+            warnsMessage = await warnsChannel.messages.fetch(warnsMessageId).catch(() => null);
+        }
+
         if (!warnsMessage) {
-            // Si no existe el mensaje, lo creamos
-            console.log('El mensaje de warns no existe, creándolo...');
-            const newMessage = await warnsChannel.send('Inicializando lista de warns...');
-            warnsMessageId = newMessage.id;
-            console.log(`Mensaje de warns creado con ID: ${warnsMessageId}`);
-            // Volvemos a llamar a la función para que se edite el mensaje recién creado
-            return updateWarnListMessage();
+            console.log('El mensaje de warns no existe. Creando un nuevo mensaje...');
+            warnsMessage = await warnsChannel.send('Inicializando lista de warns...');
+            warnsMessageId = warnsMessage.id;
+            // Guardamos el nuevo ID en la base de datos para persistencia, si es necesario.
+            // Aquí podrías añadir una llamada a tu base de datos para guardar el ID si lo necesitas.
         }
 
         const allWarnedUsersQuery = await getDocs(collection(db, 'warns'));
@@ -121,7 +124,6 @@ async function updateWarnListMessage() {
             const userWarnsQuery = await getDocs(collection(db, 'warns', userId, 'list'));
             const warnsCount = userWarnsQuery.size;
             if (warnsCount === 0) {
-                // Si el usuario no tiene warns, borramos su documento de la colección 'warns'
                 await deleteDoc(doc(db, 'warns', userId)).catch(err => console.error(`Error al eliminar documento de warns para ${userId}:`, err));
                 return null;
             }
@@ -138,8 +140,6 @@ async function updateWarnListMessage() {
             warnListContent += 'No hay usuarios con warns actualmente.';
         } else {
             for (const userEntry of validWarnedUsers) {
-                const member = await guild.members.fetch(userEntry.userId).catch(() => null);
-                
                 warnListContent += `:Communityowner: **<@${userEntry.userId}>**\n`;
                 
                 const userWarnsQuery = await getDocs(collection(db, 'warns', userEntry.userId, 'list'));
@@ -153,7 +153,9 @@ async function updateWarnListMessage() {
                         warnEmoji = ':7SNHD_Number2:';
                     } else if (index === 2) {
                         warnEmoji = ':7SNHD_Number3:';
-                    }
+                    } else {
+                        warnEmoji = ':bangbang:';
+                    }
                     warnListContent += `${warnEmoji} ${warn.motivo}\n`;
                 });
                 warnListContent += separator;
@@ -258,10 +260,10 @@ client.on('ready', async () => {
 });
 
 /**
- * Parses the participant list from the main message content.
- * @param {string[]} lineas The lines of the message content.
- * @returns {Map<string, number>} A map of user IDs to their spot number.
- */
+ * Parses the participant list from the main message content.
+ * @param {string[]} lineas The lines of the message content.
+ * @returns {Map<string, number>} A map of user IDs to their spot number.
+ */
 function parsearParticipantes(lineas) {
     const participantes = new Map();
     for (const linea of lineas) {
@@ -573,12 +575,7 @@ client.on(Events.InteractionCreate, async interaction => {
                         fecha: new Date().toISOString(),
                         moderador: author.id
                     });
-
-                    // Se llama a la función de actualización aquí
-                    if (interaction.guild) {
-                        await updateWarnListMessage();
-                    }
-
+                    await updateWarnListMessage();
                     await interaction.editReply(`✅ Warn añadido a <@${usuario.id}> por el motivo: "${motivo}"`);
                 } catch (error) {
                     console.error('Error al añadir warn:', error);
@@ -606,10 +603,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     const warnRef = doc(db, 'warns', usuario.id, 'list', warnToDelete.id);
                     await deleteDoc(warnRef);
 
-                    // Se llama a la función de actualización aquí
-                    if (interaction.guild) {
-                        await updateWarnListMessage();
-                    }
+                    await updateWarnListMessage();
 
                     await interaction.editReply(`✅ Warn número **${numeroWarn}** eliminado de <@${usuario.id}>.`);
                 } catch (error) {
@@ -625,17 +619,11 @@ client.on(Events.InteractionCreate, async interaction => {
                 }
                 
                 try {
-                    let compoId;
-                    if (interaction.values && interaction.values.length > 0) {
-                        compoId = interaction.values[0];
-                    } else {
-                        await interaction.reply({ content: 'Hubo un error al seleccionar el template. Por favor, inténtalo de nuevo.', flags: [MessageFlags.Ephemeral] });
-                        return;
-                    }
-                    
-                    const composSnapshot = await getDocs(composCollectionRef);
-                    const selectedCompo = composSnapshot.docs.find(doc => doc.id === compoId);
-                    if (!selectedCompo) {
+                    const compoId = interaction.values[0];
+                    const docRef = doc(db, `artifacts/${appId}/public/data/compos`, compoId);
+                    const selectedCompo = await getDoc(docRef);
+
+                    if (!selectedCompo.exists()) {
                         await interaction.reply({ content: 'Error: El template de party no fue encontrado.', flags: [MessageFlags.Ephemeral] });
                         return;
                     }
