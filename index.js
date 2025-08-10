@@ -625,7 +625,6 @@ client.on(Events.InteractionCreate, async interaction => {
                         await interaction.reply({ content: 'Error: El template de party no fue encontrado.', flags: [MessageFlags.Ephemeral] });
                         return;
                     }
-                    const compoContent = selectedCompo.data().content;
                     const compoName = selectedCompo.data().name;
 
                     const modal = new ModalBuilder()
@@ -1095,36 +1094,16 @@ client.on(Events.MessageCreate, async message => {
             const lineaActual = lineas[indiceLinea];
             let nuevoValor;
 
-            if (lineaActual.includes(':') && !lineaActual.includes('. X')) {
-                // Si la línea ya tiene un rol predefinido (con ':'), solo añade el usuario
-                nuevoValor = `${lineaActual} <@${author.id}>`;
-                lineas[indiceLinea] = nuevoValor;
-                await mensajePrincipal.edit(lineas.join('\n'));
-                const mensajeConfirmacion = await channel.send(`✅ <@${author.id}>, te has apuntado en el puesto **${numero}**.`);
-                setTimeout(() => mensajeConfirmacion.delete().catch(() => {}), 10000);
+            if (lineaActual.includes('. X')) {
+                nuevoValor = lineaActual.replace(/\sX$/, ` <@${author.id}>`);
             } else {
-                // Si la línea termina en '. X' o es solo un número, pedimos el rol
-                const preguntaRol = await channel.send(`<@${author.id}>, has escrito un puesto vacío. ¿Qué rol vas a ir en el puesto **${numero}**? Escribe tu rol en un mensaje.`);
-                
-                const filtro = m => m.author.id === author.id && !isNaN(parseInt(m.content.trim())) === false;
-                const colector = channel.createMessageCollector({ filter: filtro, max: 1, time: 60000 });
-                
-                colector.on('collect', async m => {
-                    const rol = m.content;
-                    let nuevaLinea = '';
-                    if (lineaActual.includes('. X')) {
-                        nuevaLinea = lineaActual.replace(/\sX$/, ` ${rol} <@${author.id}>`);
-                    } else {
-                        nuevaLinea = `${lineaActual} ${rol} <@${author.id}>`;
-                    }
-                    lineas[indiceLinea] = nuevaLinea;
-                    await mensajePrincipal.edit(lineas.join('\n'));
-                    await m.delete().catch(() => {});
-                    await preguntaRol.delete().catch(() => {});
-                    const mensajeConfirmacion = await channel.send(`✅ <@${author.id}>, te has apuntado en el puesto **${numero}** como **${rol}**.`);
-                    setTimeout(() => mensajeConfirmacion.delete().catch(() => {}), 10000);
-                });
+                nuevoValor = `${lineaActual} <@${author.id}>`;
             }
+            lineas[indiceLinea] = nuevoValor;
+
+            await mensajePrincipal.edit(lineas.join('\n'));
+            const mensajeConfirmacion = await channel.send(`✅ <@${author.id}>, te has apuntado en el puesto **${numero}**.`);
+            setTimeout(() => mensajeConfirmacion.delete().catch(() => {}), 10000);
         } else {
             const mensajeInvalido = await channel.send(`<@${author.id}>, el número **${numero}** no es un puesto válido.`);
             setTimeout(() => mensajeInvalido.delete().catch(() => {}), 10000);
