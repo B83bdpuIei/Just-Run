@@ -114,8 +114,6 @@ async function updateWarnListMessage() {
             console.log('El mensaje de warns no existe. Creando un nuevo mensaje...');
             warnsMessage = await warnsChannel.send('Inicializando lista de warns...');
             warnsMessageId = warnsMessage.id;
-            // Guardamos el nuevo ID en la base de datos para persistencia, si es necesario.
-            // Aquí podrías añadir una llamada a tu base de datos para guardar el ID si lo necesitas.
         }
 
         const allWarnedUsersQuery = await getDocs(collection(db, 'warns'));
@@ -132,15 +130,15 @@ async function updateWarnListMessage() {
 
         const validWarnedUsers = allWarnedUsers.filter(u => u !== null);
 
-        let warnListContent = `## :041: WARN LIST\n\n`;
-        const separator = `:Mels_blackline:`.repeat(11) + '\n';
+        let warnListContent = `<a:041:1404015844173938718> WARN LIST\n\n`;
+        const separator = `<a:Mels_blackline:1403848128383389776>`.repeat(11) + '\n';
         warnListContent += separator;
 
         if (validWarnedUsers.length === 0) {
             warnListContent += 'No hay usuarios con warns actualmente.';
         } else {
             for (const userEntry of validWarnedUsers) {
-                warnListContent += `:Communityowner: **<@${userEntry.userId}>**\n`;
+                warnListContent += `<a:Communityowner:1403848171092895744> **<@${userEntry.userId}>**\n`;
                 
                 const userWarnsQuery = await getDocs(collection(db, 'warns', userEntry.userId, 'list'));
                 const warns = userWarnsQuery.docs.map(doc => doc.data());
@@ -148,14 +146,14 @@ async function updateWarnListMessage() {
                 warns.forEach((warn, index) => {
                     let warnEmoji;
                     if (index === 0) {
-                        warnEmoji = ':7SNHD_Number1:';
+                        warnEmoji = '<a:dot:1404017019325517835>';
                     } else if (index === 1) {
-                        warnEmoji = ':7SNHD_Number2:';
+                        warnEmoji = '<a:h_restarting:1404017150506827808>';
                     } else if (index === 2) {
-                        warnEmoji = ':7SNHD_Number3:';
+                        warnEmoji = '<a:h_stopped:1404017205430976512>';
                     } else {
-                        warnEmoji = ':bangbang:';
-                    }
+                        warnEmoji = '<a:h_stopped:1404017205430976512>';
+                    }
                     warnListContent += `${warnEmoji} ${warn.motivo}\n`;
                 });
                 warnListContent += separator;
@@ -1028,7 +1026,6 @@ client.on(Events.MessageCreate, async message => {
             console.error('Error procesando mensaje para desapuntar:', error);
             await message.delete().catch(() => {});
             channel.send(`Hubo un error al procesar tu solicitud, <@${author.id}>. Por favor, inténtalo de nuevo.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
-            return;
         }
     }
     
