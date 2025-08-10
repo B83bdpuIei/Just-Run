@@ -37,9 +37,13 @@ app.listen(port, () => {
 let db;
 let composCollectionRef;
 let warnsCollectionRef;
-// !! IMPORTANTE: Reemplaza estos valores con los IDs reales de tu servidor !!
-let warnsChannelId = 'REEMPLAZAR_CON_ID_DEL_CANAL_DE_WARNS';
-let warnsMessageId = 'REEMPLAZAR_CON_ID_DEL_MENSAJE_DE_WARNS';
+
+// !! IMPORTANTE: REEMPLAZA ESTOS VALORES CON LOS IDs REALES DE TU SERVIDOR !!
+// Puedes obtener el ID de un canal y un mensaje haciendo clic derecho con el Modo Desarrollador activado en Discord.
+let serverId = 'TU_ID_DE_SERVIDOR';
+let warnsChannelId = '1403848025838718996';
+let warnsMessageId = 'TU_ID_DE_MENSAJE_DE_WARNS';
+
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
@@ -80,13 +84,14 @@ async function getOriginalContent(messageId, hilo) {
 }
 
 // Función para actualizar el mensaje de la lista de warns
-async function updateWarnListMessage(guild, user) {
+async function updateWarnListMessage() {
     if (!db || !warnsChannelId || !warnsMessageId) {
         console.error('Falta la configuración de Firebase o del canal/mensaje de warns. No se puede actualizar la lista.');
         return;
     }
     
     try {
+        const guild = await client.guilds.fetch(serverId);
         const warnsChannel = await guild.channels.fetch(warnsChannelId);
         if (!warnsChannel) {
             console.error('No se pudo encontrar el canal de warns.');
@@ -147,6 +152,10 @@ client.on('ready', async () => {
         composCollectionRef = collection(db, `artifacts/${appId}/public/data/compos`);
         warnsCollectionRef = collection(db, `warns`);
         console.log('✅ Firestore inicializado con éxito.');
+        
+        // Llamada inicial para actualizar la lista de warns al iniciar el bot
+        await updateWarnListMessage();
+
     } catch (error) {
         console.error('ERROR CRÍTICO: No se pudo inicializar Firestore. Las funcionalidades de base de datos no estarán disponibles.', error);
         db = null;
@@ -537,17 +546,15 @@ client.on(Events.InteractionCreate, async interaction => {
                 const author = interaction.user;
 
                 try {
-                    const userWarnsQuery = await getDocs(collection(db, 'warns', usuario.id, 'list'));
-                    const warns = userWarnsQuery.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
                     await addDoc(collection(db, 'warns', usuario.id, 'list'), {
                         motivo: motivo,
                         fecha: new Date().toISOString(),
                         moderador: author.id
                     });
 
+                    // Se llama a la función de actualización aquí
                     if (interaction.guild) {
-                        await updateWarnListMessage(interaction.guild, usuario);
+                        await updateWarnListMessage();
                     }
 
                     await interaction.editReply(`✅ Warn añadido a <@${usuario.id}> por el motivo: "${motivo}"`);
@@ -577,8 +584,9 @@ client.on(Events.InteractionCreate, async interaction => {
                     const warnRef = doc(db, 'warns', usuario.id, 'list', warnToDelete.id);
                     await deleteDoc(warnRef);
 
+                    // Se llama a la función de actualización aquí
                     if (interaction.guild) {
-                        await updateWarnListMessage(interaction.guild, usuario);
+                        await updateWarnListMessage();
                     }
 
                     await interaction.editReply(`✅ Warn número **${numeroWarn}** eliminado de <@${usuario.id}>.`);
@@ -742,7 +750,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     return;
                 }
 
-                const mensajePrincipal = await message.channel.fetchStarterMessage();
+                const mensajePrincipal = await message.channel.fetchStarterMessage().catch(() => null);
                 if (!mensajePrincipal) {
                     await interaction.editReply('No se pudo encontrar el mensaje principal de la party. Inténtalo de nuevo.');
                     return;
@@ -774,7 +782,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
                     const originalLines = originalContent.split('\n');
                     const originalLineForSpot = originalLines.find(linea => linea.startsWith(`${oldSpot}.`));
-                    
+
                     if (originalLineForSpot) {
                         lineas[oldSpotIndex] = originalLineForSpot;
                     } else {
