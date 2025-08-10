@@ -131,7 +131,7 @@ async function updateWarnListMessage() {
         const validWarnedUsers = allWarnedUsers.filter(u => u !== null);
 
         let warnListContent = `<a:041:1404015844173938718> WARN LIST\n\n`;
-        const separator = `<a:Mels_blackline:1403848128383389776>`.repeat(11) + '\n';
+        const separator = `<a:emoji_144:1404044612154429450>`.repeat(11) + '\n';
         warnListContent += separator;
 
         if (validWarnedUsers.length === 0) {
@@ -1090,7 +1090,16 @@ client.on(Events.MessageCreate, async message => {
             }
             
             const lineaActual = lineas[indiceLinea];
-            let nuevoValor = `${lineaActual} <@${author.id}>`;
+            let nuevoValor;
+
+            // Verifica si la línea contiene '. X'
+            if (lineaActual.trim().endsWith('. X')) {
+                // Elimina la 'X' y añade el nombre del usuario
+                nuevoValor = lineaActual.replace(/\sX$/, ` <@${author.id}>`);
+            } else {
+                // Comportamiento original: solo añade el nombre
+                nuevoValor = `${lineaActual} <@${author.id}>`;
+            }
             lineas[indiceLinea] = nuevoValor;
 
             await mensajePrincipal.edit(lineas.join('\n'));
