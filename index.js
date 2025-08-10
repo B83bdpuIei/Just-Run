@@ -1135,3 +1135,24 @@ console.log('------------------------------------');
 // --- Fin de las líneas de depuración ---
 
 client.login(process.env.TOKEN);
+
+// ... todo tu código anterior ...
+
+// === BLOQUE DE DIAGNÓSTICO FINAL ===
+console.log('--- INICIANDO DIAGNÓSTICO FINAL ---');
+console.log('Listando todas las variables de entorno que ve el bot:');
+console.log(process.env); // Esto mostrará TODAS las variables
+console.log('--- FIN DE LA LISTA ---');
+
+const tokenParaLogin = process.env.TOKEN;
+
+if (tokenParaLogin) {
+    console.log("Variable 'TOKEN' encontrada. Intentando login...");
+} else {
+    console.log("ERROR CRÍTICO: La variable 'process.env.TOKEN' no fue encontrada en la lista de arriba.");
+}
+// === FIN DEL BLOQUE DE DIAGNÓSTICO ===
+
+client.login(tokenParaLogin).catch(error => {
+    console.error("EL LOGIN HA FALLADO. Error recibido:", error.message);
+});
