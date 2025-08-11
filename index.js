@@ -53,6 +53,7 @@ const firebaseConfig = {
 };
 // =======================================================
 
+// --- FUNCIÓN MODIFICADA ---
 async function getOriginalContent(messageId) {
     if (!db) {
         console.error('Error: Se intentó llamar a getOriginalContent sin conexión a la base de datos.');
@@ -65,7 +66,7 @@ async function getOriginalContent(messageId) {
         if (docSnap.exists()) {
             return docSnap.data().originalContent;
         } else {
-            console.log(`No se encontró documento en 'live_parties' para el ID: ${messageId}`);
+            // Ya no se imprime nada en la consola si no se encuentra el documento.
             return null;
         }
     } catch (error) {
@@ -434,7 +435,6 @@ client.on(Events.MessageCreate, async message => {
 
     const originalContent = await getOriginalContent(mensajePrincipal.id);
 
-    // --- ESTA ES LA LÓGICA CORREGIDA ---
     if (!originalContent) {
         // Si este hilo no está en nuestra base de datos, no es una party.
         // Simplemente ignoramos el mensaje y no hacemos nada.
