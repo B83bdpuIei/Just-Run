@@ -167,7 +167,6 @@ client.on(Events.InteractionCreate, async interaction => {
             const { commandName } = interaction;
             
             if (commandName === 'start_comp') {
-                // deferReply AL INICIO
                 await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
                 
                 if (interaction.channel.isThread()) {
@@ -194,7 +193,6 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.showModal(modal);
 
             } else if (commandName === 'remove_user_compo' || commandName === 'add_user_compo') {
-                // deferReply AL INICIO
                 await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
             
                 if (!interaction.channel.isThread()) {
@@ -272,7 +270,6 @@ client.on(Events.InteractionCreate, async interaction => {
                     }
                 }
             } else if (commandName === 'delete_comp') {
-                // deferReply AL INICIO
                 await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
                 if (!db) return interaction.editReply('Error: La base de datos no está disponible.');
 
@@ -301,7 +298,6 @@ client.on(Events.InteractionCreate, async interaction => {
                 const tiempoFinalizacionInput = new TextInputBuilder().setCustomId('tiempo_finalizacion').setLabel("En cuánto tiempo finalizan inscripciones?").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ej: 2h 30m');
                 const mensajeEncabezadoInput = new TextInputBuilder().setCustomId('mensaje_encabezado').setLabel("Mensaje de encabezado?").setStyle(TextInputStyle.Paragraph).setRequired(false).setPlaceholder('Opcional...');
                 
-                // CORRECCIÓN DEL TYPO AQUÍ
                 modal.addComponents(
                     new ActionRowBuilder().addComponents(horaMasseoInput), 
                     new ActionRowBuilder().addComponents(tiempoFinalizacionInput), 
@@ -310,10 +306,54 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.showModal(modal);
 
             } else if (interaction.customId === 'delete_compo_select') {
-                await interaction.deferUpdate(); // Usar deferUpdate para menús es buena práctica
+                await interaction.deferUpdate();
                 const compoId = interaction.values[0];
                 await deleteDoc(doc(db, `artifacts/${appId}/public/data/compos`, compoId));
                 await interaction.editReply({ content: `✅ El template de party se ha eliminado correctamente.`, components: [] });
+            }
+        
+        } else if (interaction.isButton()) {
+            if (interaction.customId === 'desapuntarme_button') {
+                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+    
+                const user = interaction.user;
+                const hilo = interaction.channel;
+    
+                if (!hilo.isThread()) {
+                    return interaction.editReply('Este botón solo funciona dentro de un hilo de party.');
+                }
+    
+                const mensajePrincipal = await hilo.fetchStarterMessage().catch(() => null);
+                if (!mensajePrincipal) {
+                    return interaction.editReply('Error: No se pudo encontrar el mensaje principal de la party.');
+                }
+    
+                const originalContent = await getOriginalContent(mensajePrincipal.id);
+                if (!originalContent) {
+                    return interaction.editReply('Error: No se pudo encontrar la plantilla original para esta party.');
+                }
+    
+                const originalLines = originalContent.split('\n');
+                let lineas = mensajePrincipal.content.split('\n');
+    
+                const oldSpotIndex = lineas.findIndex(line => line.includes(`<@${user.id}>`));
+    
+                if (oldSpotIndex === -1) {
+                    return interaction.editReply('No estás apuntado en esta party.');
+                }
+    
+                const oldSpotNumberMatch = lineas[oldSpotIndex].match(/^(\d+)\./);
+                if (oldSpotNumberMatch) {
+                    const oldSpotNumber = oldSpotNumberMatch[1];
+                    const originalLineForOldSpot = originalLines.find(line => line.startsWith(`${oldSpotNumber}.`));
+    
+                    lineas[oldSpotIndex] = originalLineForOldSpot || `${oldSpotNumber}. X`;
+    
+                    await mensajePrincipal.edit(lineas.join('\n'));
+                    await interaction.editReply(`✅ Te has desapuntado del puesto **${oldSpotNumber}**.`);
+                } else {
+                    await interaction.editReply('Error: No se pudo procesar tu puesto actual en la lista.');
+                }
             }
         } else if (interaction.type === InteractionType.ModalSubmit) {
             if (interaction.customId === 'add_compo_modal') {
@@ -369,7 +409,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 if (totalMilisegundos > 0) {
                     setTimeout(async () => {
                         try {
-                            const canalHilo = await client.channels.fetch(hilo.id);
+                            const canalHilo = await client.channels.fetch(hilo.id).catch(() => null);
                             if (canalHilo && !canalHilo.archived && !canalHilo.locked) {
                                 await canalHilo.setLocked(true);
                                 await canalHilo.send('¡Las inscripciones han terminado! Este hilo ha sido bloqueado.');
@@ -397,10 +437,8 @@ client.on(Events.InteractionCreate, async interaction => {
     } catch (error) {
         console.error('Error no controlado en InteractionCreate:', error);
         if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
-            // Si no hemos respondido, intentamos una respuesta de error.
-            await interaction.reply({ content: 'Ocurrió un error inesperado al procesar tu solicitud.', flags: [MessageFlags.Ephemeral] }).catch(() => {
-                // Si incluso la respuesta de error falla, lo editamos.
-                interaction.editReply({ content: 'Ocurrió un error inesperado y no se pudo responder.' }).catch(() => {});
+            await interaction.reply({ content: 'Ocurrió un error inesperado.', flags: [MessageFlags.Ephemeral] }).catch(async () => {
+                await interaction.editReply({ content: 'Ocurrió un error inesperado.' }).catch(() => {});
             });
         }
     }
@@ -457,7 +495,7 @@ client.on(Events.MessageCreate, async message => {
 
     const newSpotIndex = lineas.findIndex(linea => linea.startsWith(`${numero}.`));
     if (newSpotIndex === -1) {
-        return channel.send(`<@${author.id}>, el puesto **${numero}** no es válido.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
+        return channel.send(`<@${author.id}>, el puesto **${numero}** no es un puesto válido.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
     }
 
     if (lineas[newSpotIndex].includes('<@')) {
