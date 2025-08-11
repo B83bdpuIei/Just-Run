@@ -965,6 +965,9 @@ ${compoContent}`;
     }
 });
 
+// =========================================================================================
+// ========= BLOQUE DE CÓDIGO CORREGIDO PARA LA INSCRIPCIÓN POR MENSAJE ====================
+// =========================================================================================
 client.on(Events.MessageCreate, async message => {
     if (message.author.bot || !message.channel.isThread()) {
         return;
@@ -1103,12 +1106,40 @@ client.on(Events.MessageCreate, async message => {
             }
             
             const lineaActual = lineas[indiceLinea];
-            let nuevoValor = `${lineaActual} <@${author.id}>`;
-            lineas[indiceLinea] = nuevoValor;
 
-            await mensajePrincipal.edit(lineas.join('\n'));
-            const mensajeConfirmacion = await channel.send(`✅ <@${author.id}>, te has apuntado en el puesto **${numero}**.`);
-            setTimeout(() => mensajeConfirmacion.delete().catch(() => {}), 10000);
+            if (lineaActual.includes('. X')) {
+                const preguntaRol = await channel.send(`<@${author.id}>, te apuntas en el puesto **${numero}**. ¿Qué rol vas a ir?`);
+        
+                const filtro = m => m.author.id === author.id;
+                const colector = channel.createMessageCollector({ filter: filtro, max: 1, time: 60000 });
+
+                colector.on('collect', async m => {
+                    await preguntaRol.delete().catch(() => {});
+                    await m.delete().catch(() => {});
+                    const rol = m.content;
+                    const nuevoValor = `${numero}. ${rol} <@${author.id}>`;
+                    lineas[indiceLinea] = nuevoValor;
+                    await mensajePrincipal.edit(lineas.join('\n'));
+                    
+                    const mensajeConfirmacion = await channel.send(`✅ <@${author.id}>, te has apuntado en el puesto **${numero}** como **${rol}**.`);
+                    setTimeout(() => mensajeConfirmacion.delete().catch(() => {}), 10000);
+                    colector.stop();
+                });
+
+                colector.on('end', collected => {
+                    if (collected.size === 0) {
+                        preguntaRol.delete().catch(() => {});
+                        channel.send(`🚫 <@${author.id}>, no respondiste a tiempo. No has sido añadido al puesto.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
+                    }
+                });
+            } else {
+                let nuevoValor = `${lineaActual} <@${author.id}>`;
+                lineas[indiceLinea] = nuevoValor;
+
+                await mensajePrincipal.edit(lineas.join('\n'));
+                const mensajeConfirmacion = await channel.send(`✅ <@${author.id}>, te has apuntado en el puesto **${numero}**.`);
+                setTimeout(() => mensajeConfirmacion.delete().catch(() => {}), 10000);
+            }
         } else {
             const mensajeInvalido = await channel.send(`<@${author.id}>, el número **${numero}** no es un puesto válido.`);
             setTimeout(() => mensajeInvalido.delete().catch(() => {}), 10000);
