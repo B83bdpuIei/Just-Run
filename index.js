@@ -128,8 +128,6 @@ async function updateWarnListMessage(guild) {
 client.on('ready', async () => {
     console.log(`Hemos iniciado sesión como ${client.user.tag}`);
 
-    // Solo inicializamos la conexión a la base de datos al estar listos.
-    // La registro de comandos ya no se hace aquí.
     try {
         const firebaseApp = initializeApp(firebaseConfig);
         db = getFirestore(firebaseApp);
@@ -435,9 +433,15 @@ client.on(Events.MessageCreate, async message => {
     if (!mensajePrincipal) return;
 
     const originalContent = await getOriginalContent(mensajePrincipal.id);
+
+    // --- ESTA ES LA LÓGICA CORREGIDA ---
     if (!originalContent) {
-        return message.delete().catch(() => {});
+        // Si este hilo no está en nuestra base de datos, no es una party.
+        // Simplemente ignoramos el mensaje y no hacemos nada.
+        return;
     }
+    
+    // El resto del código solo se ejecuta si el hilo SÍ es una party gestionada.
     const originalLines = originalContent.split('\n');
     let lineas = mensajePrincipal.content.split('\n');
 
@@ -514,4 +518,3 @@ client.on(Events.MessageCreate, async message => {
 
 
 client.login(process.env.DISCORD_TOKEN);
-
