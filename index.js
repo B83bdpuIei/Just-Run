@@ -2,9 +2,8 @@
 const {
     Client, GatewayIntentBits, Partials, Events,
     ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder,
-    SlashCommandBuilder, PermissionFlagsBits, MessageFlags, StringSelectMenuBuilder,
-    StringSelectMenuInteraction, InteractionType, ButtonBuilder, ButtonStyle,
-    codeBlock
+    MessageFlags, StringSelectMenuBuilder, InteractionType, 
+    ButtonBuilder, ButtonStyle
 } = require('discord.js');
 const { initializeApp } = require('firebase/app');
 const { getFirestore, collection, addDoc, getDocs, doc, setDoc, deleteDoc, getDoc } = require('firebase/firestore');
@@ -129,6 +128,8 @@ async function updateWarnListMessage(guild) {
 client.on('ready', async () => {
     console.log(`Hemos iniciado sesión como ${client.user.tag}`);
 
+    // Solo inicializamos la conexión a la base de datos al estar listos.
+    // La registro de comandos ya no se hace aquí.
     try {
         const firebaseApp = initializeApp(firebaseConfig);
         db = getFirestore(firebaseApp);
@@ -138,25 +139,6 @@ client.on('ready', async () => {
     } catch (error) {
         console.error('ERROR CRÍTICO: No se pudo inicializar Firestore.', error);
         db = null;
-    }
-
-    const commands = [
-        new SlashCommandBuilder().setName('start_comp').setDescription('Inicia una nueva inscripción de party con un template.').setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads),
-        new SlashCommandBuilder().setName('add_compo').setDescription('Añade un nuevo template de party a la base de datos.').setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads),
-        new SlashCommandBuilder().setName('remove_user_compo').setDescription('Elimina a un usuario de la party.').addUserOption(option => option.setName('usuario').setDescription('El usuario a eliminar.').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads),
-        new SlashCommandBuilder().setName('add_user_compo').setDescription('Añade un usuario a la party en un puesto específico.').addUserOption(option => option.setName('usuario').setDescription('El usuario a añadir.').setRequired(true)).addIntegerOption(option => option.setName('puesto').setDescription('El número del puesto (1-50).').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads),
-        new SlashCommandBuilder().setName('delete_comp').setDescription('Elimina un template de party guardado.').setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads),
-        new SlashCommandBuilder().setName('edit_comp').setDescription('Edita el mensaje principal de la party.').setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads),
-        new SlashCommandBuilder().setName('warn').setDescription('Añade un warn a un usuario.').addUserOption(option => option.setName('usuario').setDescription('El usuario a advertir.').setRequired(true)).addStringOption(option => option.setName('motivo').setDescription('El motivo de la advertencia.').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
-        new SlashCommandBuilder().setName('remove-warn').setDescription('Elimina un warn de un usuario.').addUserOption(option => option.setName('usuario').setDescription('El usuario al que se le va a quitar un warn.').setRequired(true)).addIntegerOption(option => option.setName('numero').setDescription('El número del warn a eliminar.').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
-        new SlashCommandBuilder().setName('warn-list').setDescription('Muestra la lista de warns de un usuario.').addUserOption(option => option.setName('usuario').setDescription('El usuario para ver sus warns.').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
-    ];
-
-    try {
-        await client.application.commands.set(commands);
-        console.log('✅ Comandos registrados exitosamente!');
-    } catch (error) {
-        console.error('Error al registrar comandos:', error);
     }
 });
 
@@ -532,3 +514,4 @@ client.on(Events.MessageCreate, async message => {
 
 
 client.login(process.env.DISCORD_TOKEN);
+
