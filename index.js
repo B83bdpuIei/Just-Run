@@ -54,8 +54,6 @@ const firebaseConfig = {
 };
 // =======================================================
 
-// Ya no usamos un Map en memoria. El estado se gestionará en Firebase.
-
 async function getOriginalContent(messageId) {
     if (!db) {
         console.error('Error: Se intentó llamar a getOriginalContent sin conexión a la base de datos.');
@@ -77,7 +75,6 @@ async function getOriginalContent(messageId) {
     }
 }
 
-// Función para actualizar el mensaje de la lista de warns
 async function updateWarnListMessage(guild) {
     if (!db || !warnsChannelId || !warnsMessageId) {
         console.error('Falta la configuración de Firebase o del canal/mensaje de warns. No se puede actualizar la lista.');
@@ -106,7 +103,6 @@ async function updateWarnListMessage(guild) {
         }));
 
         const validWarnedUsers = allWarnedUsers.filter(u => u.warnsCount > 0);
-
         let warnListContent = `***__WARN LIST__***\n\n`;
 
         for (const userEntry of validWarnedUsers) {
@@ -114,7 +110,6 @@ async function updateWarnListMessage(guild) {
             const warns = userWarnsQuery.docs.map(doc => doc.data());
             
             warnListContent += `**<@${userEntry.userId}>** **${warns.length}/3**\n`;
-            
             warns.forEach((warn, index) => {
                 warnListContent += `${index + 1}. - ${warn.motivo}\n`;
             });
@@ -124,7 +119,6 @@ async function updateWarnListMessage(guild) {
         if (validWarnedUsers.length === 0) {
             warnListContent += 'No hay usuarios con warns actualmente.';
         }
-
         await warnsMessage.edit(warnListContent);
     } catch (error) {
         console.error('Error al actualizar el mensaje de la lista de warns:', error);
@@ -142,79 +136,20 @@ client.on('ready', async () => {
         warnsCollectionRef = collection(db, `warns`);
         console.log('✅ Firestore inicializado con éxito.');
     } catch (error) {
-        console.error('ERROR CRÍTICO: No se pudo inicializar Firestore. Las funcionalidades de base de datos no estarán disponibles.', error);
+        console.error('ERROR CRÍTICO: No se pudo inicializar Firestore.', error);
         db = null;
     }
 
     const commands = [
-        new SlashCommandBuilder()
-            .setName('start_comp')
-            .setDescription('Inicia una nueva inscripción de party con un template.')
-            .setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads),
-        new SlashCommandBuilder()
-            .setName('add_compo')
-            .setDescription('Añade un nuevo template de party a la base de datos.')
-            .setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads),
-        new SlashCommandBuilder()
-            .setName('remove_user_compo')
-            .setDescription('Elimina a un usuario de la party.')
-            .addUserOption(option =>
-                option.setName('usuario')
-                    .setDescription('El usuario a eliminar.')
-                    .setRequired(true))
-            .setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads),
-        new SlashCommandBuilder()
-            .setName('add_user_compo')
-            .setDescription('Añade un usuario a la party en un puesto específico.')
-            .addUserOption(option =>
-                option.setName('usuario')
-                    .setDescription('El usuario a añadir.')
-                    .setRequired(true))
-            .addIntegerOption(option =>
-                option.setName('puesto')
-                    .setDescription('El número del puesto (1-50).')
-                    .setRequired(true))
-            .setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads),
-        new SlashCommandBuilder()
-            .setName('delete_comp')
-            .setDescription('Elimina un template de party guardado.')
-            .setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads),
-        new SlashCommandBuilder()
-            .setName('edit_comp')
-            .setDescription('Edita el mensaje principal de la party.')
-            .setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads),
-        new SlashCommandBuilder()
-            .setName('warn')
-            .setDescription('Añade un warn a un usuario.')
-            .addUserOption(option =>
-                option.setName('usuario')
-                    .setDescription('El usuario a advertir.')
-                    .setRequired(true))
-            .addStringOption(option =>
-                option.setName('motivo')
-                    .setDescription('El motivo de la advertencia.')
-                    .setRequired(true))
-            .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
-        new SlashCommandBuilder()
-            .setName('remove-warn')
-            .setDescription('Elimina un warn de un usuario.')
-            .addUserOption(option =>
-                option.setName('usuario')
-                    .setDescription('El usuario al que se le va a quitar un warn.')
-                    .setRequired(true))
-            .addIntegerOption(option =>
-                option.setName('numero')
-                    .setDescription('El número del warn a eliminar.')
-                    .setRequired(true))
-            .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
-        new SlashCommandBuilder()
-            .setName('warn-list')
-            .setDescription('Muestra la lista de warns de un usuario.')
-            .addUserOption(option =>
-                option.setName('usuario')
-                    .setDescription('El usuario para ver sus warns.')
-                    .setRequired(true))
-            .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
+        new SlashCommandBuilder().setName('start_comp').setDescription('Inicia una nueva inscripción de party con un template.').setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads),
+        new SlashCommandBuilder().setName('add_compo').setDescription('Añade un nuevo template de party a la base de datos.').setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads),
+        new SlashCommandBuilder().setName('remove_user_compo').setDescription('Elimina a un usuario de la party.').addUserOption(option => option.setName('usuario').setDescription('El usuario a eliminar.').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads),
+        new SlashCommandBuilder().setName('add_user_compo').setDescription('Añade un usuario a la party en un puesto específico.').addUserOption(option => option.setName('usuario').setDescription('El usuario a añadir.').setRequired(true)).addIntegerOption(option => option.setName('puesto').setDescription('El número del puesto (1-50).').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads),
+        new SlashCommandBuilder().setName('delete_comp').setDescription('Elimina un template de party guardado.').setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads),
+        new SlashCommandBuilder().setName('edit_comp').setDescription('Edita el mensaje principal de la party.').setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads),
+        new SlashCommandBuilder().setName('warn').setDescription('Añade un warn a un usuario.').addUserOption(option => option.setName('usuario').setDescription('El usuario a advertir.').setRequired(true)).addStringOption(option => option.setName('motivo').setDescription('El motivo de la advertencia.').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
+        new SlashCommandBuilder().setName('remove-warn').setDescription('Elimina un warn de un usuario.').addUserOption(option => option.setName('usuario').setDescription('El usuario al que se le va a quitar un warn.').setRequired(true)).addIntegerOption(option => option.setName('numero').setDescription('El número del warn a eliminar.').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
+        new SlashCommandBuilder().setName('warn-list').setDescription('Muestra la lista de warns de un usuario.').addUserOption(option => option.setName('usuario').setDescription('El usuario para ver sus warns.').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
     ];
 
     try {
@@ -225,9 +160,6 @@ client.on('ready', async () => {
     }
 });
 
-// Esta función ya no es necesaria con la lógica actual
-// function parsearParticipantes(lineas) { ... }
-
 
 client.on(Events.InteractionCreate, async interaction => {
     try {
@@ -235,35 +167,34 @@ client.on(Events.InteractionCreate, async interaction => {
             const { commandName } = interaction;
             
             if (commandName === 'start_comp') {
-                if (interaction.channel.isThread()) {
-                    return interaction.reply({ content: 'Este comando solo se puede usar en un canal de texto normal, no en un hilo.', flags: [MessageFlags.Ephemeral] });
-                }
+                // deferReply AL INICIO
                 await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-
+                
+                if (interaction.channel.isThread()) {
+                    return interaction.editReply('Este comando solo se puede usar en un canal de texto normal, no en un hilo.');
+                }
                 if (!db) return interaction.editReply('Error: La base de datos no está disponible.');
 
-                try {
-                    const composSnapshot = await getDocs(composCollectionRef);
-                    const options = composSnapshot.docs.map(doc => ({
-                        label: doc.data().name,
-                        value: doc.id
-                    }));
-                    if (options.length === 0) return interaction.editReply('No hay compos de party guardadas. Usa `/add_compo`.');
-                    
-                    const selectMenu = new StringSelectMenuBuilder().setCustomId('select_compo').setPlaceholder('Elige un template...').addOptions(options);
-                    const row = new ActionRowBuilder().addComponents(selectMenu);
-                    await interaction.editReply({ content: 'Por favor, selecciona una compo para iniciar:', components: [row] });
-                } catch (error) {
-                    console.error('Error al obtener las compos:', error);
-                    await interaction.editReply('Hubo un error al cargar los templates.');
-                }
+                const composSnapshot = await getDocs(composCollectionRef);
+                const options = composSnapshot.docs.map(doc => ({
+                    label: doc.data().name,
+                    value: doc.id
+                }));
+                if (options.length === 0) return interaction.editReply('No hay compos de party guardadas. Usa `/add_compo`.');
+                
+                const selectMenu = new StringSelectMenuBuilder().setCustomId('select_compo').setPlaceholder('Elige un template...').addOptions(options);
+                const row = new ActionRowBuilder().addComponents(selectMenu);
+                await interaction.editReply({ content: 'Por favor, selecciona una compo para iniciar:', components: [row] });
+            
             } else if (commandName === 'add_compo') {
                 const modal = new ModalBuilder().setCustomId('add_compo_modal').setTitle('Añadir Nuevo Template de Party');
                 const nombreInput = new TextInputBuilder().setCustomId('compo_name').setLabel("Nombre de la Compo").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ej: Party ZvZ');
                 const mensajeInput = new TextInputBuilder().setCustomId('compo_content').setLabel("Mensaje completo de la compo").setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder('Pega aquí el mensaje completo...');
                 modal.addComponents(new ActionRowBuilder().addComponents(nombreInput), new ActionRowBuilder().addComponents(mensajeInput));
                 await interaction.showModal(modal);
+
             } else if (commandName === 'remove_user_compo' || commandName === 'add_user_compo') {
+                // deferReply AL INICIO
                 await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
             
                 if (!interaction.channel.isThread()) {
@@ -272,10 +203,7 @@ client.on(Events.InteractionCreate, async interaction => {
             
                 const hilo = interaction.channel;
                 const mensajePrincipal = await hilo.fetchStarterMessage().catch(() => null);
-            
-                if (!mensajePrincipal) {
-                    return interaction.editReply('No se pudo encontrar el mensaje principal de la party.');
-                }
+                if (!mensajePrincipal) return interaction.editReply('No se pudo encontrar el mensaje principal de la party.');
             
                 const usuario = interaction.options.getUser('usuario');
                 let lineas = mensajePrincipal.content.split('\n');
@@ -286,19 +214,13 @@ client.on(Events.InteractionCreate, async interaction => {
                 }
                 const originalLines = originalContent.split('\n');
             
-                // Limpiar puesto antiguo del usuario si ya estaba apuntado
                 const oldSpotIndex = lineas.findIndex(line => line.includes(`<@${usuario.id}>`));
                 if (oldSpotIndex !== -1) {
                     const oldSpotNumberMatch = lineas[oldSpotIndex].match(/^(\d+)\./);
                     if (oldSpotNumberMatch) {
                         const oldSpotNumber = oldSpotNumberMatch[1];
                         const originalLineForOldSpot = originalLines.find(line => line.startsWith(`${oldSpotNumber}.`));
-                        if (originalLineForOldSpot) {
-                            lineas[oldSpotIndex] = originalLineForOldSpot;
-                        } else {
-                            // Fallback por si la plantilla no coincide, aunque no debería pasar
-                            lineas[oldSpotIndex] = `${oldSpotNumber}. X`;
-                        }
+                        lineas[oldSpotIndex] = originalLineForOldSpot || `${oldSpotNumber}. X`;
                     }
                 }
             
@@ -319,8 +241,6 @@ client.on(Events.InteractionCreate, async interaction => {
                     }
             
                     if (lineas[newSpotIndex].includes('<@')) {
-                        // Restaura el estado anterior si fallamos
-                        await mensajePrincipal.edit(mensajePrincipal.content);
                         return interaction.editReply(`El puesto **${puesto}** ya está ocupado.`);
                     }
             
@@ -343,8 +263,6 @@ client.on(Events.InteractionCreate, async interaction => {
                             if (collected.size === 0) {
                                 await preguntaRol.delete().catch(() => {});
                                 await interaction.editReply(`🚫 No respondiste a tiempo. El usuario no ha sido añadido.`);
-                                // Restaura el estado anterior si no hubo respuesta
-                                await mensajePrincipal.edit(mensajePrincipal.content); 
                             }
                         });
                     } else {
@@ -354,23 +272,22 @@ client.on(Events.InteractionCreate, async interaction => {
                     }
                 }
             } else if (commandName === 'delete_comp') {
-                 await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-
+                // deferReply AL INICIO
+                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
                 if (!db) return interaction.editReply('Error: La base de datos no está disponible.');
 
                 const composSnapshot = await getDocs(composCollectionRef);
                 const options = composSnapshot.docs.map(doc => ({ label: doc.data().name, value: doc.id }));
-
                 if (options.length === 0) return interaction.editReply('No hay compos guardadas para eliminar.');
 
                 const selectMenu = new StringSelectMenuBuilder().setCustomId('delete_compo_select').setPlaceholder('Elige un template para eliminar...').addOptions(options);
                 const row = new ActionRowBuilder().addComponents(selectMenu);
                 await interaction.editReply({ content: 'Selecciona la compo a eliminar:', components: [row] });
             }
-            // ... (resto de los comandos de chat como 'edit_comp', 'warn', etc. que no se ven afectados por este cambio)
+            // ... (resto de comandos de chat)
         } else if (interaction.isStringSelectMenu()) {
             if (interaction.customId === 'select_compo') {
-                 if (!db) return interaction.reply({ content: 'Error: La base de datos no está disponible.', flags: [MessageFlags.Ephemeral] });
+                if (!db) return interaction.reply({ content: 'Error: La base de datos no está disponible.', flags: [MessageFlags.Ephemeral] });
                 
                 const compoId = interaction.values[0];
                 const docRef = doc(db, `artifacts/${appId}/public/data/compos`, compoId);
@@ -383,16 +300,21 @@ client.on(Events.InteractionCreate, async interaction => {
                 const horaMasseoInput = new TextInputBuilder().setCustomId('hora_masseo').setLabel("Hora del masseo?").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ej: 22:00 UTC');
                 const tiempoFinalizacionInput = new TextInputBuilder().setCustomId('tiempo_finalizacion').setLabel("En cuánto tiempo finalizan inscripciones?").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ej: 2h 30m');
                 const mensajeEncabezadoInput = new TextInputBuilder().setCustomId('mensaje_encabezado').setLabel("Mensaje de encabezado?").setStyle(TextInputStyle.Paragraph).setRequired(false).setPlaceholder('Opcional...');
-                modal.addComponents(new ActionRowBuilder().addComponents(horaMasseoInput), new ActionRowBuilder().addComponents(tiempoFinalizacionInput), new ActionRowRowBuilder().addComponents(mensajeEncabezadoInput));
+                
+                // CORRECCIÓN DEL TYPO AQUÍ
+                modal.addComponents(
+                    new ActionRowBuilder().addComponents(horaMasseoInput), 
+                    new ActionRowBuilder().addComponents(tiempoFinalizacionInput), 
+                    new ActionRowBuilder().addComponents(mensajeEncabezadoInput)
+                );
                 await interaction.showModal(modal);
+
             } else if (interaction.customId === 'delete_compo_select') {
-                await interaction.deferUpdate({ flags: [MessageFlags.Ephemeral] });
+                await interaction.deferUpdate(); // Usar deferUpdate para menús es buena práctica
                 const compoId = interaction.values[0];
                 await deleteDoc(doc(db, `artifacts/${appId}/public/data/compos`, compoId));
                 await interaction.editReply({ content: `✅ El template de party se ha eliminado correctamente.`, components: [] });
             }
-        } else if (interaction.isButton()) {
-            // ... (lógica de botones no se ve afectada)
         } else if (interaction.type === InteractionType.ModalSubmit) {
             if (interaction.customId === 'add_compo_modal') {
                 await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
@@ -432,15 +354,11 @@ client.on(Events.InteractionCreate, async interaction => {
                 if (db) {
                     try {
                         const partyDocRef = doc(db, 'live_parties', mensajePrincipal.id);
-                        await setDoc(partyDocRef, {
-                            originalContent: compoContent,
-                            threadId: hilo.id,
-                            createdAt: new Date()
-                        });
+                        await setDoc(partyDocRef, { originalContent: compoContent, threadId: hilo.id, createdAt: new Date() });
                         console.log(`Plantilla para la party ${mensajePrincipal.id} guardada en Firebase.`);
                     } catch (error) {
                         console.error('Error CRÍTICO al guardar la plantilla inicial en Firebase:', error);
-                        hilo.send('⚠️ **Alerta:** No se pudo guardar la plantilla de esta party en la base de datos. El bot puede no funcionar correctamente si se reinicia.');
+                        hilo.send('⚠️ **Alerta:** No se pudo guardar la plantilla de esta party en la base de datos.');
                     }
                 }
 
@@ -479,43 +397,43 @@ client.on(Events.InteractionCreate, async interaction => {
     } catch (error) {
         console.error('Error no controlado en InteractionCreate:', error);
         if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
-            await interaction.reply({ content: 'Ocurrió un error inesperado.', ephemeral: true }).catch(() => {});
+            // Si no hemos respondido, intentamos una respuesta de error.
+            await interaction.reply({ content: 'Ocurrió un error inesperado al procesar tu solicitud.', flags: [MessageFlags.Ephemeral] }).catch(() => {
+                // Si incluso la respuesta de error falla, lo editamos.
+                interaction.editReply({ content: 'Ocurrió un error inesperado y no se pudo responder.' }).catch(() => {});
+            });
         }
     }
 });
 
 client.on(Events.MessageCreate, async message => {
-    if (message.author.bot || !message.channel.isThread()) return;
+    if (message.author.bot || !message.channel.isThread() || message.channel.locked) return;
 
     const { channel, author, content } = message;
-    
-    if (channel.locked) return;
 
     const mensajePrincipal = await channel.fetchStarterMessage().catch(() => null);
     if (!mensajePrincipal) return;
 
     const originalContent = await getOriginalContent(mensajePrincipal.id);
     if (!originalContent) {
-        // Si no hay plantilla, el bot no puede operar. Borra el mensaje del usuario para evitar confusiones.
         return message.delete().catch(() => {});
     }
     const originalLines = originalContent.split('\n');
     let lineas = mensajePrincipal.content.split('\n');
 
-    // Lógica para desapuntarse
     if (content.trim().toLowerCase() === 'desapuntar') {
         await message.delete().catch(() => {});
         const oldSpotIndex = lineas.findIndex(line => line.includes(`<@${author.id}>`));
 
         if (oldSpotIndex === -1) {
-            return channel.send(`❌ <@${author.id}>, no estás apuntado en esta party.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
+            return channel.send(`❌ <@${author.id}>, no estás apuntado.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
         }
 
         const oldSpotNumberMatch = lineas[oldSpotIndex].match(/^(\d+)\./);
         if (oldSpotNumberMatch) {
             const oldSpotNumber = oldSpotNumberMatch[1];
             const originalLineForOldSpot = originalLines.find(line => line.startsWith(`${oldSpotNumber}.`));
-            lineas[oldSpotIndex] = originalLineForOldSpot || `${oldSpotNumber}. X`; // Fallback
+            lineas[oldSpotIndex] = originalLineForOldSpot || `${oldSpotNumber}. X`;
             await mensajePrincipal.edit(lineas.join('\n'));
             return channel.send(`✅ <@${author.id}>, te has desapuntado del puesto **${oldSpotNumber}**.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
         }
@@ -527,7 +445,6 @@ client.on(Events.MessageCreate, async message => {
     
     await message.delete().catch(() => {});
 
-    // Limpiar puesto antiguo si ya estaba apuntado
     const oldSpotIndex = lineas.findIndex(line => line.includes(`<@${author.id}>`));
     if (oldSpotIndex !== -1) {
         const oldSpotNumberMatch = lineas[oldSpotIndex].match(/^(\d+)\./);
@@ -540,14 +457,10 @@ client.on(Events.MessageCreate, async message => {
 
     const newSpotIndex = lineas.findIndex(linea => linea.startsWith(`${numero}.`));
     if (newSpotIndex === -1) {
-        // Restaurar mensaje si el puesto no es válido
-        await mensajePrincipal.edit(lineas.join('\n'));
-        return channel.send(`<@${author.id}>, el número **${numero}** no es un puesto válido.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
+        return channel.send(`<@${author.id}>, el puesto **${numero}** no es válido.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
     }
 
     if (lineas[newSpotIndex].includes('<@')) {
-        // Restaurar mensaje si el puesto está ocupado
-        await mensajePrincipal.edit(lineas.join('\n'));
         return channel.send(`<@${author.id}>, el puesto **${numero}** ya está ocupado.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
     }
 
@@ -569,8 +482,6 @@ client.on(Events.MessageCreate, async message => {
         colector.on('end', async collected => {
             if (collected.size === 0) {
                 await preguntaRol.delete().catch(() => {});
-                // Restaurar mensaje si no hay respuesta
-                await mensajePrincipal.edit(lineas.join('\n'));
                 channel.send(`🚫 <@${author.id}>, no respondiste a tiempo.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
             }
         });
