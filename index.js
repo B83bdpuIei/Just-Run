@@ -54,11 +54,10 @@ const firebaseConfig = {
 // =======================================================
 
 
-// --- FUNCIÓN REESCRITA PARA DETECCIÓN FLEXIBLE DE PARTIES ---
+// --- FUNCIÓN PARA CREAR EMBEDS ---
 function crearEmbedsDesdePlantilla(plantillaTexto) {
     const embeds = [];
-    // Regex flexible que busca "Party" + número, ignorando lo demás.
-    const partyHeaderRegex = /(Party\s+\d+.*)/i; 
+    const partyHeaderRegex = /^(Party\s+\d+.*)/i; 
     const lineas = plantillaTexto.split('\n');
 
     let currentPartyContent = [];
@@ -78,14 +77,13 @@ function crearEmbedsDesdePlantilla(plantillaTexto) {
 
         if (match) {
             flushPartyBlock();
-            // Limpia asteriscos y espacios extra del título encontrado.
-            currentPartyTitle = match[1].replace(/\*/g, '').trim(); 
+            currentPartyTitle = match[0].replace(/\*/g, '').trim(); 
         } else if (trimmedLine) {
             currentPartyContent.push(trimmedLine);
         }
     }
 
-    flushPartyBlock(); // Procesa el último bloque de party.
+    flushPartyBlock();
 
     return embeds;
 }
@@ -288,11 +286,41 @@ client.on(Events.InteractionCreate, async interaction => {
                         if (field) {
                             puestoEncontrado = true;
                             if (field.value.includes('<@')) return interaction.editReply(`El puesto **${puesto}** ya está ocupado.`);
-                            
-                            field.value = `<@${usuario.id}>`;
-                            
-                            await mensajePrincipal.edit({ embeds });
-                            return interaction.editReply(`✅ Usuario <@${usuario.id}> añadido al puesto **${puesto}**.`);
+
+                            // --- LÓGICA CORREGIDA Y COMPLETADA PARA /add_user_compo ---
+                            const originalLine = originalContent.split('\n').find(line => line.trim().startsWith(`${puesto}.`));
+                            const isGenericSlot = originalLine && !originalLine.includes(':');
+
+                            if (isGenericSlot) {
+                                // El admin que usa el comando es 'interaction.user'
+                                await interaction.editReply({ content: `El puesto **${puesto}** es genérico. <@${interaction.user.id}>, ¿qué rol va a ir <@${usuario.id}>?`, flags: [] });
+                                
+                                const filtro = m => m.author.id === interaction.user.id;
+                                const colector = hilo.createMessageCollector({ filter: filtro, max: 1, time: 60000 });
+
+                                colector.on('collect', async m => {
+                                    await m.delete().catch(() => {});
+                                    const rol = m.content.trim();
+                                    
+                                    field.name = `${puesto}. ${rol}:`;
+                                    field.value = `<@${usuario.id}>`;
+
+                                    await mensajePrincipal.edit({ embeds });
+                                    await interaction.editReply({ content: `✅ Usuario <@${usuario.id}> añadido como **${rol}** al puesto **${puesto}**.`, components: [] });
+                                });
+
+                                colector.on('end', async (collected) => {
+                                    if (collected.size === 0) {
+                                        await interaction.editReply({ content: '🚫 No se recibió respuesta a tiempo. El usuario no ha sido añadido.', components: [] });
+                                    }
+                                });
+
+                            } else {
+                                field.value = `<@${usuario.id}>`;
+                                await mensajePrincipal.edit({ embeds });
+                                await interaction.editReply(`✅ Usuario <@${usuario.id}> añadido al puesto **${puesto}**.`);
+                            }
+                            return; // Importante para salir del bucle una vez gestionado
                         }
                     }
                     if (!puestoEncontrado) return interaction.editReply(`El puesto **${puesto}** no es válido.`);
@@ -538,7 +566,6 @@ client.on(Events.MessageCreate, async message => {
                     return channel.send(`<@${author.id}>, el puesto **${numero}** ya está ocupado.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
                 }
                 
-                // Un puesto es genérico si su nombre original no tenía dos puntos.
                 const originalLine = originalContent.split('\n').find(line => line.trim().startsWith(`${numero}.`));
                 const isGenericSlot = originalLine && !originalLine.includes(':');
 
@@ -559,9 +586,9 @@ client.on(Events.MessageCreate, async message => {
                         channel.send(`✅ <@${author.id}>, te has apuntado como **${rol}** en el puesto **${numero}**.`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
                     });
 
-                    colector.on('end', async collected => {
+                    colector.on('end', async (collected) => {
                         if (collected.size === 0) {
-                            findAndRestoreField(`<@${author.id}>`); // Restaura si no responde a tiempo
+                            findAndRestoreField(`<@${author.id}>`);
                             await mensajePrincipal.edit({ embeds });
                             channel.send(`🚫 <@${author.id}>, no respondiste a tiempo.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
                         }
