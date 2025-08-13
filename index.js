@@ -54,14 +54,13 @@ const firebaseConfig = {
 // =======================================================
 
 
-// --- FUNCIÓN REESCRITA DESDE CERO PARA CREAR EMBEDS (MÉTODO ROBUSTO) ---
+// --- FUNCIÓN REESCRITA DESDE CERO PARA CREAR EMBEDS (MÉTODO MÁS ROBUSTO) ---
 function crearEmbedsDesdePlantilla(plantillaTexto) {
     const embeds = [];
     const partyHeaderRegex = /\s*\*\*(Party\s*\d+)\s*\*\*/gi;
     let match;
     const headers = [];
 
-    // 1. Encontrar todos los encabezados de Party y sus posiciones
     while ((match = partyHeaderRegex.exec(plantillaTexto)) !== null) {
         headers.push({
             title: match[1].trim(),
@@ -70,50 +69,57 @@ function crearEmbedsDesdePlantilla(plantillaTexto) {
         });
     }
 
-    if (headers.length === 0) {
-        console.error("No se encontraron encabezados de Party en la plantilla.");
-        return [];
-    }
+    if (headers.length === 0) return [];
 
-    // 2. Procesar cada bloque de party por separado
     for (let i = 0; i < headers.length; i++) {
         const header = headers[i];
         const nextHeader = headers[i + 1];
-        
-        const blockContent = plantillaTexto.substring(
-            header.startIndex + header.headerLength,
-            nextHeader ? nextHeader.startIndex : plantillaTexto.length
-        ).trim();
+        const blockContent = plantillaTexto.substring(header.startIndex + header.headerLength, nextHeader ? nextHeader.startIndex : plantillaTexto.length).trim();
 
         if (!blockContent) continue;
 
+        const embedsForBlock = [];
         let currentEmbed = new EmbedBuilder()
             .setTitle(`🔥 ${header.title} 🔥`)
             .setColor(embeds.length % 2 === 0 ? '#5865F2' : '#F47B67');
         let fieldCount = 0;
-        
+
         const lineas = blockContent.split('\n');
-        
+
         for (const linea of lineas) {
             const trimmedLine = linea.trim();
             if (!trimmedLine) continue;
 
-            const matchRol = trimmedLine.match(/^(\d+\.\s*.*?:)\s*(.*)$/);
-            if (matchRol) {
+            const matchLine = trimmedLine.match(/^(\d+)\.(.*)/);
+            if (matchLine) {
                 if (fieldCount >= 25) {
-                    embeds.push(currentEmbed);
+                    embedsForBlock.push(currentEmbed);
                     currentEmbed = new EmbedBuilder()
                         .setTitle(`🔥 ${header.title} (Cont.) 🔥`)
                         .setColor(currentEmbed.data.color);
                     fieldCount = 0;
                 }
-                const nombreCampo = matchRol[1].trim();
-                const valorCampo = matchRol[2].trim() || 'X';
-                currentEmbed.addFields({ name: nombreCampo, value: valorCampo, inline: true });
+
+                const number = matchLine[1];
+                const rest = matchLine[2].trim();
+                let fieldName = '';
+                let fieldValue = '';
+
+                if (rest.includes(':')) {
+                    const parts = rest.split(':', 2);
+                    fieldName = `${number}. ${parts[0].trim()}:`;
+                    fieldValue = parts[1].trim() || 'X';
+                } else {
+                    fieldName = `${number}. ${rest}:`;
+                    fieldValue = 'X';
+                }
+
+                currentEmbed.addFields({ name: fieldName, value: fieldValue, inline: true });
                 fieldCount++;
             }
         }
-        embeds.push(currentEmbed);
+        embedsForBlock.push(currentEmbed);
+        embeds.push(...embedsForBlock);
     }
     return embeds;
 }
@@ -236,7 +242,7 @@ client.on(Events.InteractionCreate, async interaction => {
                             const originalLines = originalContent.split('\n');
                             const originalLine = originalLines.find(line => line.trim().startsWith(field.name));
                             const matchRol = originalLine ? originalLine.match(/^(\d+\.\s*.*?:)\s*(.*)$/) : null;
-                            field.value = (matchRol && matchRol[2].trim()) || 'X';
+                            field.value = (matchRol && matchRol[2] && matchRol[2].trim()) || 'X';
                             usuarioEncontrado = true;
                             break;
                         }
@@ -259,9 +265,6 @@ client.on(Events.InteractionCreate, async interaction => {
                             puestoEncontrado = true;
                             if (field.value.includes('<@')) return interaction.editReply(`El puesto **${puesto}** ya está ocupado.`);
                             
-                            // --- LÓGICA CORREGIDA PARA /add_user_compo ---
-                            // El valor del campo siempre es solo la mención del usuario.
-                            // El rol está definido por el NOMBRE del campo.
                             field.value = `<@${usuario.id}>`;
                             
                             await mensajePrincipal.edit({ embeds });
@@ -334,7 +337,7 @@ client.on(Events.InteractionCreate, async interaction => {
                             const originalLines = originalContent.split('\n');
                             const originalLine = originalLines.find(line => line.trim().startsWith(field.name));
                             const matchRol = originalLine ? originalLine.match(/^(\d+\.\s*.*?:)\s*(.*)$/) : null;
-                            field.value = (matchRol && matchRol[2].trim()) || 'X';
+                            field.value = (matchRol && matchRol[2] && matchRol[2].trim()) || 'X';
                             usuarioEncontrado = true;
                             puestoDesapuntado = field.name.match(/^(\d+)/)[1];
                             break;
@@ -457,7 +460,7 @@ client.on(Events.MessageCreate, async message => {
                         const originalLines = originalContent.split('\n');
                         const originalLine = originalLines.find(line => line.trim().startsWith(field.name));
                         const matchRol = originalLine ? originalLine.match(/^(\d+\.\s*.*?:)\s*(.*)$/) : null;
-                        field.value = (matchRol && matchRol[2].trim()) || 'X';
+                        field.value = (matchRol && matchRol[2] && matchRol[2].trim()) || 'X';
                         usuarioEncontrado = true;
                         puestoDesapuntado = field.name.match(/^(\d+)/)[1];
                         break;
@@ -484,7 +487,7 @@ client.on(Events.MessageCreate, async message => {
                     const originalLines = originalContent.split('\n');
                     const originalLine = originalLines.find(line => line.trim().startsWith(field.name));
                     const matchRol = originalLine ? originalLine.match(/^(\d+\.\s*.*?:)\s*(.*)$/) : null;
-                    field.value = (matchRol && matchRol[2].trim()) || 'X';
+                    field.value = (matchRol && matchRol[2] && matchRol[2].trim()) || 'X';
                     break;
                 }
             }
@@ -499,8 +502,7 @@ client.on(Events.MessageCreate, async message => {
                     return channel.send(`<@${author.id}>, el puesto **${numero}** ya está ocupado.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
                 }
                 
-                // --- LÓGICA CORREGIDA PARA PREGUNTAR ROL ---
-                const isGenericSlot = !!field.name.match(/^\d+\.\s*X\s*:/i);
+                const isGenericSlot = !!field.name.match(/:\s*X\s*$/i);
 
                 if (isGenericSlot) {
                     const preguntaRol = await channel.send(`<@${author.id}>, te apuntas en el puesto **${numero}**. ¿Qué rol vas a ir?`);
