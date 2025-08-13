@@ -6,7 +6,7 @@ const {
     ButtonBuilder, ButtonStyle, EmbedBuilder
 } = require('discord.js');
 const { initializeApp } = require('firebase/app');
-const { getFirestore, collection, addDoc, getDocs, doc, setDoc, deleteDoc, getDoc } = require('firebase/firestore');
+const { getFirestore, collection, addDoc, getDocs, doc, setDoc, deleteDoc, getDoc, updateDoc } = require('firebase/firestore'); // Añadido updateDoc
 
 // Importar Express para el servidor web de Render
 const express = require('express');
@@ -54,10 +54,9 @@ const firebaseConfig = {
 // =======================================================
 
 
-// --- FUNCIÓN CORREGIDA Y SIMPLIFICADA PARA CREAR EMBEDS ---
+// --- FUNCIÓN PARA CREAR EMBEDS ---
 function crearEmbedsDesdePlantilla(plantillaTexto) {
     const embeds = [];
-    // Regex flexible que busca "Party" + número, permitiendo decoraciones.
     const partyHeaderRegex = /^\W*(Party\s+\d+.*)/i; 
     const lineas = plantillaTexto.split('\n');
 
@@ -77,14 +76,14 @@ function crearEmbedsDesdePlantilla(plantillaTexto) {
         const match = trimmedLine.match(partyHeaderRegex);
 
         if (match) {
-            flushPartyBlock(); // Procesa el bloque de la party anterior
-            currentPartyTitle = match[1].replace(/\*/g, '').trim(); // Asigna el nuevo título
+            flushPartyBlock();
+            currentPartyTitle = match[1].replace(/\*/g, '').trim(); 
         } else if (trimmedLine) {
-            currentPartyContent.push(trimmedLine); // Añade la línea de rol al bloque actual
+            currentPartyContent.push(trimmedLine);
         }
     }
 
-    flushPartyBlock(); // Procesa el último bloque de party que quede
+    flushPartyBlock();
 
     return embeds;
 }
@@ -128,7 +127,7 @@ function crearEmbedsParaUnBloque(title, content, embedCount) {
             fieldCount++;
         }
     }
-    if (fieldCount > 0) { // Solo añade el embed si tiene campos
+    if (fieldCount > 0) {
         embeds.push(currentEmbed);
     }
     return embeds;
@@ -220,17 +219,27 @@ client.on(Events.InteractionCreate, async interaction => {
             
             const { commandName } = interaction;
             
-            if (commandName === 'start_comp') {
-                if (interaction.channel.isThread()) return interaction.editReply('Este comando solo se puede usar en un canal de texto normal.');
+            if (commandName === 'start_comp' || commandName === 'delete_comp' || commandName === 'edit_compo') {
                 if (!db) return interaction.editReply('Error: La base de datos no está disponible.');
-
                 const composSnapshot = await getDocs(composCollectionRef);
                 const options = composSnapshot.docs.map(doc => ({ label: doc.data().name, value: doc.id }));
-                if (options.length === 0) return interaction.editReply('No hay compos de party guardadas. Usa `/add_compo`.');
+                if (options.length === 0) return interaction.editReply('No hay compos de party guardadas.');
+
+                let customId, placeholder;
+                if(commandName === 'start_comp') {
+                    customId = 'select_compo';
+                    placeholder = 'Elige una compo para iniciar...';
+                } else if (commandName === 'delete_comp') {
+                    customId = 'delete_compo_select';
+                    placeholder = 'Elige una compo para eliminar...';
+                } else { // edit_compo
+                    customId = 'edit_compo_select';
+                    placeholder = 'Elige una compo para editar...';
+                }
                 
-                const selectMenu = new StringSelectMenuBuilder().setCustomId('select_compo').setPlaceholder('Elige un template...').addOptions(options);
+                const selectMenu = new StringSelectMenuBuilder().setCustomId(customId).setPlaceholder(placeholder).addOptions(options);
                 const row = new ActionRowBuilder().addComponents(selectMenu);
-                await interaction.editReply({ content: 'Por favor, selecciona una compo para iniciar:', components: [row] });
+                await interaction.editReply({ content: 'Por favor, selecciona una compo:', components: [row] });
             
             } else if (commandName === 'remove_user_compo' || commandName === 'add_user_compo') {
                  if (!interaction.channel.isThread()) return interaction.editReply('Este comando solo se puede usar dentro de un hilo de party.');
@@ -326,15 +335,6 @@ client.on(Events.InteractionCreate, async interaction => {
                     }
                     if (!puestoEncontrado) return interaction.editReply(`El puesto **${puesto}** no es válido.`);
                 }
-            } else if (commandName === 'delete_comp') {
-                 if (!db) return interaction.editReply('Error: La base de datos no está disponible.');
-                const composSnapshot = await getDocs(composCollectionRef);
-                const options = composSnapshot.docs.map(doc => ({ label: doc.data().name, value: doc.id }));
-                if (options.length === 0) return interaction.editReply('No hay compos guardadas para eliminar.');
-
-                const selectMenu = new StringSelectMenuBuilder().setCustomId('delete_compo_select').setPlaceholder('Elige un template para eliminar...').addOptions(options);
-                const row = new ActionRowBuilder().addComponents(selectMenu);
-                await interaction.editReply({ content: 'Selecciona la compo a eliminar:', components: [row] });
             }
         } else if (interaction.isStringSelectMenu()) {
              if (interaction.customId === 'select_compo') {
@@ -364,6 +364,36 @@ client.on(Events.InteractionCreate, async interaction => {
                 const compoId = interaction.values[0];
                 await deleteDoc(doc(db, `artifacts/${appId}/public/data/compos`, compoId));
                 await interaction.editReply({ content: `✅ El template de party se ha eliminado correctamente.`, components: [] });
+            
+            } else if (interaction.customId === 'edit_compo_select') { // Lógica para el menú de edición
+                if (!db) return interaction.reply({ content: 'Error: La base de datos no está disponible.', flags: [MessageFlags.Ephemeral] });
+
+                const compoId = interaction.values[0];
+                const docRef = doc(db, `artifacts/${appId}/public/data/compos`, compoId);
+                const selectedCompo = await getDoc(docRef);
+
+                if (!selectedCompo.exists()) return interaction.reply({ content: 'Error: El template no fue encontrado.', flags: [MessageFlags.Ephemeral] });
+                
+                const compoData = selectedCompo.data();
+
+                const modal = new ModalBuilder().setCustomId(`edit_compo_modal_${compoId}`).setTitle(`Editando: ${compoData.name}`);
+                
+                const nombreInput = new TextInputBuilder()
+                    .setCustomId('compo_name_edit')
+                    .setLabel("Nombre de la Compo")
+                    .setStyle(TextInputStyle.Short)
+                    .setValue(compoData.name)
+                    .setRequired(true);
+
+                const mensajeInput = new TextInputBuilder()
+                    .setCustomId('compo_content_edit')
+                    .setLabel("Mensaje completo de la compo")
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setValue(compoData.content)
+                    .setRequired(true);
+
+                modal.addComponents(new ActionRowBuilder().addComponents(nombreInput), new ActionRowBuilder().addComponents(mensajeInput));
+                await interaction.showModal(modal);
             }
         
         } else if (interaction.isButton()) {
@@ -434,9 +464,21 @@ client.on(Events.InteractionCreate, async interaction => {
                 if (!db) return interaction.editReply('Error: La base de datos no está disponible.');
                 await addDoc(composCollectionRef, { name: compoName, content: compoContent });
                 await interaction.editReply(`✅ Template **${compoName}** guardado.`);
-            }
+            } else if (interaction.customId.startsWith('edit_compo_modal_')) { // Lógica para el modal de edición
+                const compoId = interaction.customId.split('_')[3];
+                const docRef = doc(db, `artifacts/${appId}/public/data/compos`, compoId);
+                
+                const newName = interaction.fields.getTextInputValue('compo_name_edit');
+                const newContent = interaction.fields.getTextInputValue('compo_content_edit');
+                
+                await updateDoc(docRef, {
+                    name: newName,
+                    content: newContent
+                });
 
-            if (interaction.customId.startsWith('start_comp_modal_')) {
+                await interaction.editReply(`✅ Template **${newName}** actualizado correctamente.`);
+
+            } else if (interaction.customId.startsWith('start_comp_modal_')) {
                 const compoId = interaction.customId.split('_')[3];
                 if (!db) return interaction.editReply('Error: La base de datos no está disponible.');
 
