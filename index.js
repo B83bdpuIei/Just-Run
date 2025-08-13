@@ -54,25 +54,46 @@ const firebaseConfig = {
 // =======================================================
 
 
-// --- FUNCIÓN REESCRITA Y CORREGIDA PARA CREAR EMBEDS ---
+// --- FUNCIÓN REESCRITA DESDE CERO PARA CREAR EMBEDS (MÉTODO ROBUSTO) ---
 function crearEmbedsDesdePlantilla(plantillaTexto) {
     const embeds = [];
-    // Divide la plantilla en bloques por cada "Party". El regex captura el título de la party.
-    const partyBlocks = plantillaTexto.split(/\s*\*\*(Party\s*\d+)\s*\*\*/i);
+    const partyHeaderRegex = /\s*\*\*(Party\s*\d+)\s*\*\*/gi;
+    let match;
+    const headers = [];
 
-    // El primer elemento del split suele ser texto vacío antes de la primera party, lo ignoramos.
-    // Iteramos de 2 en 2: un elemento es el título (Party 1), el siguiente son sus roles.
-    for (let i = 1; i < partyBlocks.length; i += 2) {
-        const partyTitle = partyBlocks[i].trim();
-        const rolesTexto = partyBlocks[i + 1];
-        if (!rolesTexto) continue;
+    // 1. Encontrar todos los encabezados de Party y sus posiciones
+    while ((match = partyHeaderRegex.exec(plantillaTexto)) !== null) {
+        headers.push({
+            title: match[1].trim(),
+            startIndex: match.index,
+            headerLength: match[0].length
+        });
+    }
+
+    if (headers.length === 0) {
+        console.error("No se encontraron encabezados de Party en la plantilla.");
+        return [];
+    }
+
+    // 2. Procesar cada bloque de party por separado
+    for (let i = 0; i < headers.length; i++) {
+        const header = headers[i];
+        const nextHeader = headers[i + 1];
+        
+        const blockContent = plantillaTexto.substring(
+            header.startIndex + header.headerLength,
+            nextHeader ? nextHeader.startIndex : plantillaTexto.length
+        ).trim();
+
+        if (!blockContent) continue;
 
         let currentEmbed = new EmbedBuilder()
-            .setTitle(`🔥 ${partyTitle} 🔥`)
+            .setTitle(`🔥 ${header.title} 🔥`)
             .setColor(embeds.length % 2 === 0 ? '#5865F2' : '#F47B67');
         let fieldCount = 0;
-
-        const lineas = rolesTexto.split('\n');
+        
+        const lineas = blockContent.split('\n');
+        
         for (const linea of lineas) {
             const trimmedLine = linea.trim();
             if (!trimmedLine) continue;
@@ -82,7 +103,7 @@ function crearEmbedsDesdePlantilla(plantillaTexto) {
                 if (fieldCount >= 25) {
                     embeds.push(currentEmbed);
                     currentEmbed = new EmbedBuilder()
-                        .setTitle(`${partyTitle} (Cont.)`)
+                        .setTitle(`🔥 ${header.title} (Cont.) 🔥`)
                         .setColor(currentEmbed.data.color);
                     fieldCount = 0;
                 }
@@ -90,9 +111,6 @@ function crearEmbedsDesdePlantilla(plantillaTexto) {
                 const valorCampo = matchRol[2].trim() || 'X';
                 currentEmbed.addFields({ name: nombreCampo, value: valorCampo, inline: true });
                 fieldCount++;
-            } else {
-                 const desc = currentEmbed.data.description || '';
-                 currentEmbed.setDescription((desc + '\n' + trimmedLine).trim());
             }
         }
         embeds.push(currentEmbed);
@@ -165,6 +183,15 @@ client.on('ready', async () => {
 client.on(Events.InteractionCreate, async interaction => {
     try {
         if (interaction.isChatInputCommand()) {
+            if (interaction.commandName === 'add_compo') {
+                 const modal = new ModalBuilder().setCustomId('add_compo_modal').setTitle('Añadir Nuevo Template de Party');
+                 const nombreInput = new TextInputBuilder().setCustomId('compo_name').setLabel("Nombre de la Compo").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ej: Party ZvZ');
+                 const mensajeInput = new TextInputBuilder().setCustomId('compo_content').setLabel("Mensaje completo de la compo").setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder('Pega aquí el mensaje completo...');
+                 modal.addComponents(new ActionRowBuilder().addComponents(nombreInput), new ActionRowBuilder().addComponents(mensajeInput));
+                 await interaction.showModal(modal);
+                 return;
+            }
+            
             try {
                 await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
             } catch (error) {
@@ -172,24 +199,11 @@ client.on(Events.InteractionCreate, async interaction => {
                     console.warn(`Interacción ignorada (probablemente por cold start): ${interaction.commandName}`);
                     return;
                 }
-                // Si es un error de "already acknowledged" al añadir compo, lo ignoramos porque el modal se mostrará.
-                if (interaction.commandName === 'add_compo' && error.code === 40060) return;
                 throw error;
             }
             
             const { commandName } = interaction;
             
-            if (commandName === 'add_compo') {
-                const modal = new ModalBuilder().setCustomId('add_compo_modal').setTitle('Añadir Nuevo Template de Party');
-                const nombreInput = new TextInputBuilder().setCustomId('compo_name').setLabel("Nombre de la Compo").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ej: Party ZvZ');
-                const mensajeInput = new TextInputBuilder().setCustomId('compo_content').setLabel("Mensaje completo de la compo").setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder('Pega aquí el mensaje completo...');
-                modal.addComponents(new ActionRowBuilder().addComponents(nombreInput), new ActionRowBuilder().addComponents(mensajeInput));
-                // showModal es la primera respuesta, por eso el defer a veces da error. Es seguro ignorarlo.
-                await interaction.showModal(modal);
-                return;
-            }
-
-            // El resto de los comandos sí necesitan el deferReply que ya se hizo
             if (commandName === 'start_comp') {
                 if (interaction.channel.isThread()) return interaction.editReply('Este comando solo se puede usar en un canal de texto normal.');
                 if (!db) return interaction.editReply('Error: La base de datos no está disponible.');
@@ -245,14 +259,10 @@ client.on(Events.InteractionCreate, async interaction => {
                             puestoEncontrado = true;
                             if (field.value.includes('<@')) return interaction.editReply(`El puesto **${puesto}** ya está ocupado.`);
                             
-                            const rolDefinido = !field.name.match(/^\d+\.\s*X\s*:/i);
-                            
-                            if (rolDefinido) {
-                                const rolTexto = field.name.replace(/^\d+\.\s*/, '').replace(/:$/, '').trim();
-                                field.value = `${rolTexto} <@${usuario.id}>`;
-                            } else {
-                                field.value = `<@${usuario.id}>`;
-                            }
+                            // --- LÓGICA CORREGIDA PARA /add_user_compo ---
+                            // El valor del campo siempre es solo la mención del usuario.
+                            // El rol está definido por el NOMBRE del campo.
+                            field.value = `<@${usuario.id}>`;
                             
                             await mensajePrincipal.edit({ embeds });
                             return interaction.editReply(`✅ Usuario <@${usuario.id}> añadido al puesto **${puesto}**.`);
@@ -382,7 +392,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 
                 const embedsParaEnviar = crearEmbedsDesdePlantilla(compoContent);
                 if (embedsParaEnviar.length === 0) {
-                    return interaction.editReply("Error: La plantilla parece estar vacía o en un formato incorrecto.");
+                    return interaction.editReply("Error: La plantilla parece estar vacía o en un formato incorrecto. Asegúrate de que contiene encabezados como `**Party 1**`.");
                 }
 
                 const mensajeDeParty = {
@@ -490,8 +500,6 @@ client.on(Events.MessageCreate, async message => {
                 }
                 
                 // --- LÓGICA CORREGIDA PARA PREGUNTAR ROL ---
-                // Solo preguntará por el rol si el nombre del campo contiene una "X"
-                // (lo que indica que la plantilla original era genérica, ej: "10. X:").
                 const isGenericSlot = !!field.name.match(/^\d+\.\s*X\s*:/i);
 
                 if (isGenericSlot) {
@@ -503,7 +511,6 @@ client.on(Events.MessageCreate, async message => {
                         await preguntaRol.delete().catch(() => {});
                         await m.delete().catch(() => {});
                         const rol = m.content.trim();
-                        // Actualiza el nombre del campo para reflejar el rol elegido
                         field.name = `${numero}. ${rol}:`;
                         field.value = `<@${author.id}>`;
                         await mensajePrincipal.edit({ embeds });
@@ -517,7 +524,6 @@ client.on(Events.MessageCreate, async message => {
                         }
                     });
                 } else {
-                    // Si el rol ya está definido, simplemente añade al usuario.
                     field.value = `<@${author.id}>`;
                     await mensajePrincipal.edit({ embeds });
                     channel.send(`✅ <@${author.id}>, te has apuntado en el puesto **${numero}**.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
