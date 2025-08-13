@@ -281,10 +281,9 @@ client.on(Events.InteractionCreate, async interaction => {
                     return wasFound;
                 };
             
-                const usuarioEncontrado = findAndRestoreField(`<@${usuario.id}>`);
+                findAndRestoreField(`<@${usuario.id}>`);
             
                 if (commandName === 'remove_user_compo') {
-                    if (!usuarioEncontrado) return interaction.editReply(`El usuario <@${usuario.id}> no se encuentra en la lista.`);
                     await mensajePrincipal.edit({ embeds });
                     return interaction.editReply(`✅ Usuario <@${usuario.id}> eliminado correctamente.`);
                 }
@@ -448,20 +447,6 @@ client.on(Events.InteractionCreate, async interaction => {
             }
         } else if (interaction.type === InteractionType.ModalSubmit) {
             
-            // Lógica del modal de edición va primero porque no necesita deferReply en el mismo scope.
-            if (interaction.customId.startsWith('edit_compo_modal_')) {
-                const compoId = interaction.customId.split('_')[3];
-                const docRef = doc(db, `artifacts/${appId}/public/data/compos`, compoId);
-                
-                const newName = interaction.fields.getTextInputValue('compo_name_edit');
-                const newContent = interaction.fields.getTextInputValue('compo_content_edit');
-                
-                await updateDoc(docRef, { name: newName, content: newContent });
-
-                // Respondemos directamente, sin defer previo.
-                return interaction.reply({ content: `✅ Template **${newName}** actualizado correctamente.`, flags: [MessageFlags.Ephemeral] });
-            }
-
             try {
                 await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
             } catch (error) {
@@ -470,6 +455,24 @@ client.on(Events.InteractionCreate, async interaction => {
                     return;
                 }
                 throw error;
+            }
+
+            if (interaction.customId.startsWith('edit_compo_modal_')) {
+                const compoId = interaction.customId.split('_')[3];
+                if (!db) return interaction.editReply('Error: La base de datos no está disponible.');
+                const docRef = doc(db, `artifacts/${appId}/public/data/compos`, compoId);
+                
+                const newName = interaction.fields.getTextInputValue('compo_name_edit');
+                const newContent = interaction.fields.getTextInputValue('compo_content_edit');
+                
+                try {
+                    await updateDoc(docRef, { name: newName, content: newContent });
+                    await interaction.editReply(`✅ Template **${newName}** actualizado correctamente.`);
+                } catch(error) {
+                    console.error("Error al actualizar la compo en Firebase:", error);
+                    await interaction.editReply("Hubo un error al guardar los cambios en la base de datos.");
+                }
+                return;
             }
             
             if (interaction.customId === 'add_compo_modal') {
