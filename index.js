@@ -54,33 +54,38 @@ const firebaseConfig = {
 // =======================================================
 
 
-// --- FUNCIÓN REESCRITA DESDE CERO PARA CREAR EMBEDS (MÉTODO DEFINITIVO) ---
+// --- FUNCIÓN REESCRITA PARA DETECCIÓN FLEXIBLE DE PARTIES ---
 function crearEmbedsDesdePlantilla(plantillaTexto) {
     const embeds = [];
-    const partyHeaderRegex = /^(Party\s+\d+)/i;
+    // Regex flexible que busca "Party" + número, ignorando lo demás.
+    const partyHeaderRegex = /(Party\s+\d+.*)/i; 
     const lineas = plantillaTexto.split('\n');
 
     let currentPartyContent = [];
-    let currentPartyTitle = 'Party'; 
+    let currentPartyTitle = ''; 
+
+    const flushPartyBlock = () => {
+        if (currentPartyContent.length > 0 && currentPartyTitle) {
+            embeds.push(...crearEmbedsParaUnBloque(currentPartyTitle, currentPartyContent.join('\n'), embeds.length));
+        }
+        currentPartyContent = [];
+        currentPartyTitle = '';
+    };
 
     for (const linea of lineas) {
         const trimmedLine = linea.trim();
         const match = trimmedLine.match(partyHeaderRegex);
 
         if (match) {
-            if (currentPartyContent.length > 0) {
-                embeds.push(...crearEmbedsParaUnBloque(currentPartyTitle, currentPartyContent.join('\n'), embeds.length));
-            }
-            currentPartyTitle = match[0];
-            currentPartyContent = [];
+            flushPartyBlock();
+            // Limpia asteriscos y espacios extra del título encontrado.
+            currentPartyTitle = match[1].replace(/\*/g, '').trim(); 
         } else if (trimmedLine) {
             currentPartyContent.push(trimmedLine);
         }
     }
 
-    if (currentPartyContent.length > 0) {
-        embeds.push(...crearEmbedsParaUnBloque(currentPartyTitle, currentPartyContent.join('\n'), embeds.length));
-    }
+    flushPartyBlock(); // Procesa el último bloque de party.
 
     return embeds;
 }
@@ -509,9 +514,7 @@ client.on(Events.MessageCreate, async message => {
 
         if (content.trim().toLowerCase() === 'desapuntar') {
             await message.delete().catch(() => {});
-            
             const wasFound = findAndRestoreField(`<@${author.id}>`);
-            
             if (wasFound) {
                 await mensajePrincipal.edit({ embeds });
                 return channel.send(`✅ <@${author.id}>, te has desapuntado.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
@@ -535,7 +538,9 @@ client.on(Events.MessageCreate, async message => {
                     return channel.send(`<@${author.id}>, el puesto **${numero}** ya está ocupado.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
                 }
                 
-                const isGenericSlot = !field.name.split(':')[0].includes(' ');
+                // Un puesto es genérico si su nombre original no tenía dos puntos.
+                const originalLine = originalContent.split('\n').find(line => line.trim().startsWith(`${numero}.`));
+                const isGenericSlot = originalLine && !originalLine.includes(':');
 
                 if (isGenericSlot) {
                     const preguntaRol = await channel.send(`<@${author.id}>, te apuntas en el puesto **${numero}**. ¿Qué rol vas a ir?`);
@@ -556,7 +561,8 @@ client.on(Events.MessageCreate, async message => {
 
                     colector.on('end', async collected => {
                         if (collected.size === 0) {
-                            await preguntaRol.delete().catch(() => {});
+                            findAndRestoreField(`<@${author.id}>`); // Restaura si no responde a tiempo
+                            await mensajePrincipal.edit({ embeds });
                             channel.send(`🚫 <@${author.id}>, no respondiste a tiempo.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
                         }
                     });
