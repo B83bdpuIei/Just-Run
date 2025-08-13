@@ -54,73 +54,77 @@ const firebaseConfig = {
 // =======================================================
 
 
-// --- FUNCIÓN REESCRITA DESDE CERO PARA CREAR EMBEDS (MÉTODO MÁS ROBUSTO) ---
+// --- FUNCIÓN REESCRITA DESDE CERO PARA CREAR EMBEDS (MÉTODO DEFINITIVO) ---
 function crearEmbedsDesdePlantilla(plantillaTexto) {
     const embeds = [];
-    const partyHeaderRegex = /\s*\*\*(Party\s*\d+)\s*\*\*/gi;
-    let match;
-    const headers = [];
+    const partyHeaderRegex = /^(Party\s+\d+)/i;
+    const lineas = plantillaTexto.split('\n');
 
-    while ((match = partyHeaderRegex.exec(plantillaTexto)) !== null) {
-        headers.push({
-            title: match[1].trim(),
-            startIndex: match.index,
-            headerLength: match[0].length
-        });
-    }
+    let currentPartyContent = [];
+    let currentPartyTitle = 'Party'; 
 
-    if (headers.length === 0) return [];
+    for (const linea of lineas) {
+        const trimmedLine = linea.trim();
+        const match = trimmedLine.match(partyHeaderRegex);
 
-    for (let i = 0; i < headers.length; i++) {
-        const header = headers[i];
-        const nextHeader = headers[i + 1];
-        const blockContent = plantillaTexto.substring(header.startIndex + header.headerLength, nextHeader ? nextHeader.startIndex : plantillaTexto.length).trim();
-
-        if (!blockContent) continue;
-
-        const embedsForBlock = [];
-        let currentEmbed = new EmbedBuilder()
-            .setTitle(`🔥 ${header.title} 🔥`)
-            .setColor(embeds.length % 2 === 0 ? '#5865F2' : '#F47B67');
-        let fieldCount = 0;
-
-        const lineas = blockContent.split('\n');
-
-        for (const linea of lineas) {
-            const trimmedLine = linea.trim();
-            if (!trimmedLine) continue;
-
-            const matchLine = trimmedLine.match(/^(\d+)\.(.*)/);
-            if (matchLine) {
-                if (fieldCount >= 25) {
-                    embedsForBlock.push(currentEmbed);
-                    currentEmbed = new EmbedBuilder()
-                        .setTitle(`🔥 ${header.title} (Cont.) 🔥`)
-                        .setColor(currentEmbed.data.color);
-                    fieldCount = 0;
-                }
-
-                const number = matchLine[1];
-                const rest = matchLine[2].trim();
-                let fieldName = '';
-                let fieldValue = '';
-
-                if (rest.includes(':')) {
-                    const parts = rest.split(':', 2);
-                    fieldName = `${number}. ${parts[0].trim()}:`;
-                    fieldValue = parts[1].trim() || 'X';
-                } else {
-                    fieldName = `${number}. ${rest}:`;
-                    fieldValue = 'X';
-                }
-
-                currentEmbed.addFields({ name: fieldName, value: fieldValue, inline: true });
-                fieldCount++;
+        if (match) {
+            if (currentPartyContent.length > 0) {
+                embeds.push(...crearEmbedsParaUnBloque(currentPartyTitle, currentPartyContent.join('\n'), embeds.length));
             }
+            currentPartyTitle = match[0];
+            currentPartyContent = [];
+        } else if (trimmedLine) {
+            currentPartyContent.push(trimmedLine);
         }
-        embedsForBlock.push(currentEmbed);
-        embeds.push(...embedsForBlock);
     }
+
+    if (currentPartyContent.length > 0) {
+        embeds.push(...crearEmbedsParaUnBloque(currentPartyTitle, currentPartyContent.join('\n'), embeds.length));
+    }
+
+    return embeds;
+}
+
+function crearEmbedsParaUnBloque(title, content, embedCount) {
+    const embeds = [];
+    let currentEmbed = new EmbedBuilder()
+        .setTitle(`🔥 ${title} 🔥`)
+        .setColor(embedCount % 2 === 0 ? '#5865F2' : '#F47B67');
+    let fieldCount = 0;
+
+    const lineas = content.split('\n');
+    for (const linea of lineas) {
+        const trimmedLine = linea.trim();
+        if (!trimmedLine) continue;
+
+        const matchLine = trimmedLine.match(/^(\d+)\.(.*)/);
+        if (matchLine) {
+            if (fieldCount >= 25) {
+                embeds.push(currentEmbed);
+                currentEmbed = new EmbedBuilder()
+                    .setTitle(`🔥 ${title} (Cont.) 🔥`)
+                    .setColor(currentEmbed.data.color);
+                fieldCount = 0;
+            }
+
+            const number = matchLine[1].trim();
+            const rest = matchLine[2].trim();
+            let fieldName, fieldValue;
+
+            if (rest.includes(':')) {
+                const parts = rest.split(':', 2);
+                fieldName = `${number}. ${parts[0].trim()}:`;
+                fieldValue = parts[1].trim() || 'X';
+            } else {
+                fieldName = `${number}. ${rest}:`;
+                fieldValue = 'X';
+            }
+
+            currentEmbed.addFields({ name: fieldName, value: fieldValue, inline: true });
+            fieldCount++;
+        }
+    }
+    embeds.push(currentEmbed);
     return embeds;
 }
 
@@ -201,7 +205,7 @@ client.on(Events.InteractionCreate, async interaction => {
             try {
                 await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
             } catch (error) {
-                if (error.code === 10062) {
+                if (error.code === 10062) { // Unknown Interaction
                     console.warn(`Interacción ignorada (probablemente por cold start): ${interaction.commandName}`);
                     return;
                 }
@@ -234,21 +238,36 @@ client.on(Events.InteractionCreate, async interaction => {
                 if (!originalContent) return interaction.editReply('Error: No se pudo encontrar la plantilla original.');
             
                 const embeds = mensajePrincipal.embeds.map(e => new EmbedBuilder(e.toJSON()));
-                let usuarioEncontrado = false;
-            
-                for (const embed of embeds) {
-                    for (const field of embed.data.fields) {
-                        if (field.value.includes(`<@${usuario.id}>`)) {
-                            const originalLines = originalContent.split('\n');
-                            const originalLine = originalLines.find(line => line.trim().startsWith(field.name));
-                            const matchRol = originalLine ? originalLine.match(/^(\d+\.\s*.*?:)\s*(.*)$/) : null;
-                            field.value = (matchRol && matchRol[2] && matchRol[2].trim()) || 'X';
-                            usuarioEncontrado = true;
-                            break;
+                
+                const findAndRestoreField = (userTag) => {
+                    let wasFound = false;
+                    for (const embed of embeds) {
+                        for (const field of embed.data.fields) {
+                            if (field.value.includes(userTag)) {
+                                const numeroPuesto = field.name.match(/^(\d+)\./)[1];
+                                const originalLine = originalContent.split('\n').find(line => line.trim().startsWith(`${numeroPuesto}.`));
+                                if (originalLine) {
+                                    const matchLine = originalLine.trim().match(/^(\d+)\.(.*)/);
+                                    const rest = matchLine[2].trim();
+                                    if (rest.includes(':')) {
+                                        const parts = rest.split(':', 2);
+                                        field.name = `${numeroPuesto}. ${parts[0].trim()}:`;
+                                        field.value = parts[1].trim() || 'X';
+                                    } else {
+                                        field.name = `${numeroPuesto}. ${rest}:`;
+                                        field.value = 'X';
+                                    }
+                                }
+                                wasFound = true;
+                                break;
+                            }
                         }
+                        if (wasFound) break;
                     }
-                    if (usuarioEncontrado) break;
-                }
+                    return wasFound;
+                };
+            
+                const usuarioEncontrado = findAndRestoreField(`<@${usuario.id}>`);
             
                 if (commandName === 'remove_user_compo') {
                     if (!usuarioEncontrado) return interaction.editReply(`El usuario <@${usuario.id}> no se encuentra en la lista.`);
@@ -328,25 +347,36 @@ client.on(Events.InteractionCreate, async interaction => {
                 if (!originalContent) return interaction.editReply('Error: No se pudo encontrar la plantilla original.');
                 
                 const embeds = mensajePrincipal.embeds.map(e => new EmbedBuilder(e.toJSON()));
-                let usuarioEncontrado = false;
+                
+                let wasFound = false;
                 let puestoDesapuntado = '';
 
                 for (const embed of embeds) {
                     for (const field of embed.data.fields) {
                         if (field.value.includes(`<@${user.id}>`)) {
-                            const originalLines = originalContent.split('\n');
-                            const originalLine = originalLines.find(line => line.trim().startsWith(field.name));
-                            const matchRol = originalLine ? originalLine.match(/^(\d+\.\s*.*?:)\s*(.*)$/) : null;
-                            field.value = (matchRol && matchRol[2] && matchRol[2].trim()) || 'X';
-                            usuarioEncontrado = true;
-                            puestoDesapuntado = field.name.match(/^(\d+)/)[1];
+                            const numeroPuesto = field.name.match(/^(\d+)\./)[1];
+                            const originalLine = originalContent.split('\n').find(line => line.trim().startsWith(`${numeroPuesto}.`));
+                            if (originalLine) {
+                                const matchLine = originalLine.trim().match(/^(\d+)\.(.*)/);
+                                const rest = matchLine[2].trim();
+                                if (rest.includes(':')) {
+                                    const parts = rest.split(':', 2);
+                                    field.name = `${numeroPuesto}. ${parts[0].trim()}:`;
+                                    field.value = parts[1].trim() || 'X';
+                                } else {
+                                    field.name = `${numeroPuesto}. ${rest}:`;
+                                    field.value = 'X';
+                                }
+                            }
+                            wasFound = true;
+                            puestoDesapuntado = numeroPuesto;
                             break;
                         }
                     }
-                    if (usuarioEncontrado) break;
+                    if (wasFound) break;
                 }
     
-                if (usuarioEncontrado) {
+                if (wasFound) {
                     await mensajePrincipal.edit({ embeds });
                     await interaction.editReply(`✅ Te has desapuntado del puesto **${puestoDesapuntado}**.`);
                 } else {
@@ -395,7 +425,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 
                 const embedsParaEnviar = crearEmbedsDesdePlantilla(compoContent);
                 if (embedsParaEnviar.length === 0) {
-                    return interaction.editReply("Error: La plantilla parece estar vacía o en un formato incorrecto. Asegúrate de que contiene encabezados como `**Party 1**`.");
+                    return interaction.editReply("Error: La plantilla parece estar vacía o en un formato incorrecto. Asegúrate de que contiene encabezados como `Party 1`.");
                 }
 
                 const mensajeDeParty = {
@@ -449,29 +479,42 @@ client.on(Events.MessageCreate, async message => {
         
         const embeds = mensajePrincipal.embeds.map(e => new EmbedBuilder(e.toJSON()));
         
-        if (content.trim().toLowerCase() === 'desapuntar') {
-            await message.delete().catch(() => {});
-            let usuarioEncontrado = false;
-            let puestoDesapuntado = '';
-
+        const findAndRestoreField = (userTag) => {
+            let wasFound = false;
             for (const embed of embeds) {
                 for (const field of embed.data.fields) {
-                    if (field.value.includes(`<@${author.id}>`)) {
-                        const originalLines = originalContent.split('\n');
-                        const originalLine = originalLines.find(line => line.trim().startsWith(field.name));
-                        const matchRol = originalLine ? originalLine.match(/^(\d+\.\s*.*?:)\s*(.*)$/) : null;
-                        field.value = (matchRol && matchRol[2] && matchRol[2].trim()) || 'X';
-                        usuarioEncontrado = true;
-                        puestoDesapuntado = field.name.match(/^(\d+)/)[1];
+                    if (field.value.includes(userTag)) {
+                        const numeroPuesto = field.name.match(/^(\d+)\./)[1];
+                        const originalLine = originalContent.split('\n').find(line => line.trim().startsWith(`${numeroPuesto}.`));
+                        if (originalLine) {
+                            const matchLine = originalLine.trim().match(/^(\d+)\.(.*)/);
+                            const rest = matchLine[2].trim();
+                            if (rest.includes(':')) {
+                                const parts = rest.split(':', 2);
+                                field.name = `${numeroPuesto}. ${parts[0].trim()}:`;
+                                field.value = parts[1].trim() || 'X';
+                            } else {
+                                field.name = `${numeroPuesto}. ${rest}:`;
+                                field.value = 'X';
+                            }
+                        }
+                        wasFound = true;
                         break;
                     }
                 }
-                if(usuarioEncontrado) break;
+                if (wasFound) break;
             }
+            return wasFound;
+        };
+
+        if (content.trim().toLowerCase() === 'desapuntar') {
+            await message.delete().catch(() => {});
             
-            if (usuarioEncontrado) {
+            const wasFound = findAndRestoreField(`<@${author.id}>`);
+            
+            if (wasFound) {
                 await mensajePrincipal.edit({ embeds });
-                return channel.send(`✅ <@${author.id}>, te has desapuntado del puesto **${puestoDesapuntado}**.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
+                return channel.send(`✅ <@${author.id}>, te has desapuntado.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
             } else {
                 return channel.send(`❌ <@${author.id}>, no estás apuntado.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
             }
@@ -481,17 +524,7 @@ client.on(Events.MessageCreate, async message => {
         if (isNaN(numero) || numero < 1 || numero > 100) return;
         await message.delete().catch(() => {});
 
-        for (const embed of embeds) {
-            for (const field of embed.data.fields) {
-                if (field.value.includes(`<@${author.id}>`)) {
-                    const originalLines = originalContent.split('\n');
-                    const originalLine = originalLines.find(line => line.trim().startsWith(field.name));
-                    const matchRol = originalLine ? originalLine.match(/^(\d+\.\s*.*?:)\s*(.*)$/) : null;
-                    field.value = (matchRol && matchRol[2] && matchRol[2].trim()) || 'X';
-                    break;
-                }
-            }
-        }
+        findAndRestoreField(`<@${author.id}>`);
 
         let puestoEncontrado = false;
         for (const embed of embeds) {
@@ -502,7 +535,7 @@ client.on(Events.MessageCreate, async message => {
                     return channel.send(`<@${author.id}>, el puesto **${numero}** ya está ocupado.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
                 }
                 
-                const isGenericSlot = !!field.name.match(/:\s*X\s*$/i);
+                const isGenericSlot = !field.name.split(':')[0].includes(' ');
 
                 if (isGenericSlot) {
                     const preguntaRol = await channel.send(`<@${author.id}>, te apuntas en el puesto **${numero}**. ¿Qué rol vas a ir?`);
@@ -513,8 +546,10 @@ client.on(Events.MessageCreate, async message => {
                         await preguntaRol.delete().catch(() => {});
                         await m.delete().catch(() => {});
                         const rol = m.content.trim();
+                        
                         field.name = `${numero}. ${rol}:`;
                         field.value = `<@${author.id}>`;
+
                         await mensajePrincipal.edit({ embeds });
                         channel.send(`✅ <@${author.id}>, te has apuntado como **${rol}** en el puesto **${numero}**.`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
                     });
