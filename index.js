@@ -54,10 +54,11 @@ const firebaseConfig = {
 // =======================================================
 
 
-// --- FUNCIÓN PARA CREAR EMBEDS ---
+// --- FUNCIÓN CORREGIDA Y SIMPLIFICADA PARA CREAR EMBEDS ---
 function crearEmbedsDesdePlantilla(plantillaTexto) {
     const embeds = [];
-    const partyHeaderRegex = /^(Party\s+\d+.*)/i; 
+    // Regex flexible que busca "Party" + número, permitiendo decoraciones.
+    const partyHeaderRegex = /^\W*(Party\s+\d+.*)/i; 
     const lineas = plantillaTexto.split('\n');
 
     let currentPartyContent = [];
@@ -76,14 +77,14 @@ function crearEmbedsDesdePlantilla(plantillaTexto) {
         const match = trimmedLine.match(partyHeaderRegex);
 
         if (match) {
-            flushPartyBlock();
-            currentPartyTitle = match[0].replace(/\*/g, '').trim(); 
+            flushPartyBlock(); // Procesa el bloque de la party anterior
+            currentPartyTitle = match[1].replace(/\*/g, '').trim(); // Asigna el nuevo título
         } else if (trimmedLine) {
-            currentPartyContent.push(trimmedLine);
+            currentPartyContent.push(trimmedLine); // Añade la línea de rol al bloque actual
         }
     }
 
-    flushPartyBlock();
+    flushPartyBlock(); // Procesa el último bloque de party que quede
 
     return embeds;
 }
@@ -127,7 +128,9 @@ function crearEmbedsParaUnBloque(title, content, embedCount) {
             fieldCount++;
         }
     }
-    embeds.push(currentEmbed);
+    if (fieldCount > 0) { // Solo añade el embed si tiene campos
+        embeds.push(currentEmbed);
+    }
     return embeds;
 }
 
@@ -287,13 +290,11 @@ client.on(Events.InteractionCreate, async interaction => {
                             puestoEncontrado = true;
                             if (field.value.includes('<@')) return interaction.editReply(`El puesto **${puesto}** ya está ocupado.`);
 
-                            // --- LÓGICA CORREGIDA Y COMPLETADA PARA /add_user_compo ---
                             const originalLine = originalContent.split('\n').find(line => line.trim().startsWith(`${puesto}.`));
                             const isGenericSlot = originalLine && !originalLine.includes(':');
 
                             if (isGenericSlot) {
-                                // El admin que usa el comando es 'interaction.user'
-                                await interaction.editReply({ content: `El puesto **${puesto}** es genérico. <@${interaction.user.id}>, ¿qué rol va a ir <@${usuario.id}>?`, flags: [] });
+                                await interaction.editReply({ content: `El puesto **${puesto}** es genérico. <@${interaction.user.id}>, ¿qué rol va a ir <@${usuario.id}>?`, components: [] });
                                 
                                 const filtro = m => m.author.id === interaction.user.id;
                                 const colector = hilo.createMessageCollector({ filter: filtro, max: 1, time: 60000 });
@@ -306,12 +307,12 @@ client.on(Events.InteractionCreate, async interaction => {
                                     field.value = `<@${usuario.id}>`;
 
                                     await mensajePrincipal.edit({ embeds });
-                                    await interaction.editReply({ content: `✅ Usuario <@${usuario.id}> añadido como **${rol}** al puesto **${puesto}**.`, components: [] });
+                                    await interaction.editReply({ content: `✅ Usuario <@${usuario.id}> añadido como **${rol}** al puesto **${puesto}**.` });
                                 });
 
                                 colector.on('end', async (collected) => {
                                     if (collected.size === 0) {
-                                        await interaction.editReply({ content: '🚫 No se recibió respuesta a tiempo. El usuario no ha sido añadido.', components: [] });
+                                        await interaction.editReply({ content: '🚫 No se recibió respuesta a tiempo. El usuario no ha sido añadido.' });
                                     }
                                 });
 
@@ -320,7 +321,7 @@ client.on(Events.InteractionCreate, async interaction => {
                                 await mensajePrincipal.edit({ embeds });
                                 await interaction.editReply(`✅ Usuario <@${usuario.id}> añadido al puesto **${puesto}**.`);
                             }
-                            return; // Importante para salir del bucle una vez gestionado
+                            return;
                         }
                     }
                     if (!puestoEncontrado) return interaction.editReply(`El puesto **${puesto}** no es válido.`);
