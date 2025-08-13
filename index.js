@@ -53,53 +53,48 @@ const firebaseConfig = {
 };
 // =======================================================
 
-// --- FUNCIÓN CORREGIDA Y MEJORADA PARA CREAR EMBEDS ---
+
+// --- FUNCIÓN REESCRITA Y CORREGIDA PARA CREAR EMBEDS ---
 function crearEmbedsDesdePlantilla(plantillaTexto) {
     const embeds = [];
-    let currentEmbed = null;
-    let fieldCount = 0;
-    const lineas = plantillaTexto.split('\n');
+    // Divide la plantilla en bloques por cada "Party". El regex captura el título de la party.
+    const partyBlocks = plantillaTexto.split(/\s*\*\*(Party\s*\d+)\s*\*\*/i);
 
-    for (const linea of lineas) {
-        const trimmedLine = linea.trim();
-        if (!trimmedLine) continue;
+    // El primer elemento del split suele ser texto vacío antes de la primera party, lo ignoramos.
+    // Iteramos de 2 en 2: un elemento es el título (Party 1), el siguiente son sus roles.
+    for (let i = 1; i < partyBlocks.length; i += 2) {
+        const partyTitle = partyBlocks[i].trim();
+        const rolesTexto = partyBlocks[i + 1];
+        if (!rolesTexto) continue;
 
-        const partyHeaderMatch = trimmedLine.match(/^\s*\*\*(Party\s*\d+)\s*\*\*/i);
-        if (partyHeaderMatch) {
-            if (currentEmbed) {
-                embeds.push(currentEmbed);
+        let currentEmbed = new EmbedBuilder()
+            .setTitle(`🔥 ${partyTitle} 🔥`)
+            .setColor(embeds.length % 2 === 0 ? '#5865F2' : '#F47B67');
+        let fieldCount = 0;
+
+        const lineas = rolesTexto.split('\n');
+        for (const linea of lineas) {
+            const trimmedLine = linea.trim();
+            if (!trimmedLine) continue;
+
+            const matchRol = trimmedLine.match(/^(\d+\.\s*.*?:)\s*(.*)$/);
+            if (matchRol) {
+                if (fieldCount >= 25) {
+                    embeds.push(currentEmbed);
+                    currentEmbed = new EmbedBuilder()
+                        .setTitle(`${partyTitle} (Cont.)`)
+                        .setColor(currentEmbed.data.color);
+                    fieldCount = 0;
+                }
+                const nombreCampo = matchRol[1].trim();
+                const valorCampo = matchRol[2].trim() || 'X';
+                currentEmbed.addFields({ name: nombreCampo, value: valorCampo, inline: true });
+                fieldCount++;
+            } else {
+                 const desc = currentEmbed.data.description || '';
+                 currentEmbed.setDescription((desc + '\n' + trimmedLine).trim());
             }
-            const partyTitle = partyHeaderMatch[1].trim();
-            currentEmbed = new EmbedBuilder()
-                .setTitle(`🔥 ${partyTitle} 🔥`)
-                .setColor(embeds.length % 2 === 0 ? '#5865F2' : '#F47B67');
-            fieldCount = 0;
-            continue;
         }
-
-        if (!currentEmbed) continue;
-
-        const matchRol = trimmedLine.match(/^(\d+\.\s*.*?:)\s*(.*)$/);
-        if (matchRol) {
-            if (fieldCount >= 25) {
-                embeds.push(currentEmbed);
-                const originalTitle = currentEmbed.data.title.replace(' (Cont.)', '');
-                currentEmbed = new EmbedBuilder()
-                    .setTitle(`${originalTitle} (Cont.)`)
-                    .setColor(currentEmbed.data.color);
-                fieldCount = 0;
-            }
-            const nombreCampo = matchRol[1].trim();
-            const valorCampo = matchRol[2].trim() || 'X';
-            currentEmbed.addFields({ name: nombreCampo, value: valorCampo, inline: true });
-            fieldCount++;
-        } else {
-            const desc = currentEmbed.data.description || '';
-            currentEmbed.setDescription((desc + '\n' + trimmedLine).trim());
-        }
-    }
-
-    if (currentEmbed) {
         embeds.push(currentEmbed);
     }
     return embeds;
@@ -118,7 +113,7 @@ async function getOriginalContent(messageId) {
     }
 }
 
-// ... (La función updateWarnListMessage no necesita cambios)
+// ... (El resto de funciones auxiliares como updateWarnListMessage no necesitan cambios)
 async function updateWarnListMessage(guild) {
     if (!db || warnsChannelId.startsWith('REEMPLAZAR') || warnsMessageId.startsWith('REEMPLAZAR')) return;
     try {
@@ -171,18 +166,30 @@ client.on(Events.InteractionCreate, async interaction => {
     try {
         if (interaction.isChatInputCommand()) {
             try {
-                // CORRECCIÓN: Se usa flags y se añade manejo de error para cold start.
                 await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
             } catch (error) {
-                if (error.code === 10062) { // Unknown Interaction
+                if (error.code === 10062) {
                     console.warn(`Interacción ignorada (probablemente por cold start): ${interaction.commandName}`);
                     return;
                 }
+                // Si es un error de "already acknowledged" al añadir compo, lo ignoramos porque el modal se mostrará.
+                if (interaction.commandName === 'add_compo' && error.code === 40060) return;
                 throw error;
             }
             
             const { commandName } = interaction;
             
+            if (commandName === 'add_compo') {
+                const modal = new ModalBuilder().setCustomId('add_compo_modal').setTitle('Añadir Nuevo Template de Party');
+                const nombreInput = new TextInputBuilder().setCustomId('compo_name').setLabel("Nombre de la Compo").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ej: Party ZvZ');
+                const mensajeInput = new TextInputBuilder().setCustomId('compo_content').setLabel("Mensaje completo de la compo").setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder('Pega aquí el mensaje completo...');
+                modal.addComponents(new ActionRowBuilder().addComponents(nombreInput), new ActionRowBuilder().addComponents(mensajeInput));
+                // showModal es la primera respuesta, por eso el defer a veces da error. Es seguro ignorarlo.
+                await interaction.showModal(modal);
+                return;
+            }
+
+            // El resto de los comandos sí necesitan el deferReply que ya se hizo
             if (commandName === 'start_comp') {
                 if (interaction.channel.isThread()) return interaction.editReply('Este comando solo se puede usar en un canal de texto normal.');
                 if (!db) return interaction.editReply('Error: La base de datos no está disponible.');
@@ -195,17 +202,8 @@ client.on(Events.InteractionCreate, async interaction => {
                 const row = new ActionRowBuilder().addComponents(selectMenu);
                 await interaction.editReply({ content: 'Por favor, selecciona una compo para iniciar:', components: [row] });
             
-            } else if (commandName === 'add_compo') {
-                // Esta parte no necesita deferReply, showModal es la primera respuesta.
-                const modal = new ModalBuilder().setCustomId('add_compo_modal').setTitle('Añadir Nuevo Template de Party');
-                const nombreInput = new TextInputBuilder().setCustomId('compo_name').setLabel("Nombre de la Compo").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ej: Party ZvZ');
-                const mensajeInput = new TextInputBuilder().setCustomId('compo_content').setLabel("Mensaje completo de la compo").setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder('Pega aquí el mensaje completo...');
-                modal.addComponents(new ActionRowBuilder().addComponents(nombreInput), new ActionRowBuilder().addComponents(mensajeInput));
-                await interaction.showModal(modal);
-                // No se puede hacer editReply después de showModal, por eso eliminamos el deferReply inicial del bloque de comandos.
-
             } else if (commandName === 'remove_user_compo' || commandName === 'add_user_compo') {
-                if (!interaction.channel.isThread()) return interaction.editReply('Este comando solo se puede usar dentro de un hilo de party.');
+                 if (!interaction.channel.isThread()) return interaction.editReply('Este comando solo se puede usar dentro de un hilo de party.');
             
                 const hilo = interaction.channel;
                 const mensajePrincipal = await hilo.fetchStarterMessage().catch(() => null);
@@ -218,7 +216,6 @@ client.on(Events.InteractionCreate, async interaction => {
                 const embeds = mensajePrincipal.embeds.map(e => new EmbedBuilder(e.toJSON()));
                 let usuarioEncontrado = false;
             
-                // Lógica para quitar al usuario de cualquier puesto
                 for (const embed of embeds) {
                     for (const field of embed.data.fields) {
                         if (field.value.includes(`<@${usuario.id}>`)) {
@@ -248,11 +245,15 @@ client.on(Events.InteractionCreate, async interaction => {
                             puestoEncontrado = true;
                             if (field.value.includes('<@')) return interaction.editReply(`El puesto **${puesto}** ya está ocupado.`);
                             
-                            // Lógica mejorada para añadir al usuario
-                            const rolDefinido = !field.name.match(/^\d+\.\s*$/); // Comprueba si el nombre del campo es más que solo "N."
-                            const rolTexto = rolDefinido ? field.name.replace(/^\d+\.\s*/, '').replace(/:$/, '') : 'rol no especificado';
+                            const rolDefinido = !field.name.match(/^\d+\.\s*X\s*:/i);
                             
-                            field.value = `${rolDefinido ? rolTexto : ''} <@${usuario.id}>`.trim();
+                            if (rolDefinido) {
+                                const rolTexto = field.name.replace(/^\d+\.\s*/, '').replace(/:$/, '').trim();
+                                field.value = `${rolTexto} <@${usuario.id}>`;
+                            } else {
+                                field.value = `<@${usuario.id}>`;
+                            }
+                            
                             await mensajePrincipal.edit({ embeds });
                             return interaction.editReply(`✅ Usuario <@${usuario.id}> añadido al puesto **${puesto}**.`);
                         }
@@ -260,7 +261,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     if (!puestoEncontrado) return interaction.editReply(`El puesto **${puesto}** no es válido.`);
                 }
             } else if (commandName === 'delete_comp') {
-                if (!db) return interaction.editReply('Error: La base de datos no está disponible.');
+                 if (!db) return interaction.editReply('Error: La base de datos no está disponible.');
                 const composSnapshot = await getDocs(composCollectionRef);
                 const options = composSnapshot.docs.map(doc => ({ label: doc.data().name, value: doc.id }));
                 if (options.length === 0) return interaction.editReply('No hay compos guardadas para eliminar.');
@@ -300,7 +301,7 @@ client.on(Events.InteractionCreate, async interaction => {
             }
         
         } else if (interaction.isButton()) {
-            if (interaction.customId === 'desapuntarme_button') {
+             if (interaction.customId === 'desapuntarme_button') {
                 await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
     
                 const user = interaction.user;
@@ -340,11 +341,11 @@ client.on(Events.InteractionCreate, async interaction => {
                 }
             }
         } else if (interaction.type === InteractionType.ModalSubmit) {
-             try {
+            try {
                 await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
             } catch (error) {
                 if (error.code === 10062) {
-                    console.warn(`Interacción de Modal ignorada (probablemente por cold start): ${interaction.customId}`);
+                    console.warn(`Interacción de Modal ignorada (cold start): ${interaction.customId}`);
                     return;
                 }
                 throw error;
@@ -419,9 +420,6 @@ client.on(Events.InteractionCreate, async interaction => {
         }
     } catch (error) {
         console.error('Error no controlado en InteractionCreate:', error);
-        if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
-            await interaction.reply({ content: 'Ocurrió un error inesperado.', flags: [MessageFlags.Ephemeral] }).catch(()=>{});
-        }
     }
 });
 
@@ -491,8 +489,10 @@ client.on(Events.MessageCreate, async message => {
                     return channel.send(`<@${author.id}>, el puesto **${numero}** ya está ocupado.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
                 }
                 
-                // CORRECCIÓN: Comprobar si el nombre del campo ya define un rol
-                const isGenericSlot = !!field.name.match(/^\d+\.\s*X\s*:/i) || field.value.toLowerCase() === 'x';
+                // --- LÓGICA CORREGIDA PARA PREGUNTAR ROL ---
+                // Solo preguntará por el rol si el nombre del campo contiene una "X"
+                // (lo que indica que la plantilla original era genérica, ej: "10. X:").
+                const isGenericSlot = !!field.name.match(/^\d+\.\s*X\s*:/i);
 
                 if (isGenericSlot) {
                     const preguntaRol = await channel.send(`<@${author.id}>, te apuntas en el puesto **${numero}**. ¿Qué rol vas a ir?`);
@@ -502,8 +502,10 @@ client.on(Events.MessageCreate, async message => {
                     colector.on('collect', async m => {
                         await preguntaRol.delete().catch(() => {});
                         await m.delete().catch(() => {});
-                        const rol = m.content;
-                        field.value = `${rol} <@${author.id}>`;
+                        const rol = m.content.trim();
+                        // Actualiza el nombre del campo para reflejar el rol elegido
+                        field.name = `${numero}. ${rol}:`;
+                        field.value = `<@${author.id}>`;
                         await mensajePrincipal.edit({ embeds });
                         channel.send(`✅ <@${author.id}>, te has apuntado como **${rol}** en el puesto **${numero}**.`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
                     });
@@ -515,8 +517,8 @@ client.on(Events.MessageCreate, async message => {
                         }
                     });
                 } else {
-                    const rolDefinido = field.name.replace(/^\d+\.\s*/, '').replace(/:$/, '').trim();
-                    field.value = `${rolDefinido} <@${author.id}>`;
+                    // Si el rol ya está definido, simplemente añade al usuario.
+                    field.value = `<@${author.id}>`;
                     await mensajePrincipal.edit({ embeds });
                     channel.send(`✅ <@${author.id}>, te has apuntado en el puesto **${numero}**.`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
                 }
