@@ -447,17 +447,11 @@ client.on(Events.InteractionCreate, async interaction => {
             }
         } else if (interaction.type === InteractionType.ModalSubmit) {
             
-            try {
-                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-            } catch (error) {
-                if (error.code === 10062) {
-                    console.warn(`Interacción de Modal ignorada (cold start): ${interaction.customId}`);
-                    return;
-                }
-                throw error;
-            }
-
+            // --- LÓGICA CORREGIDA PARA EL MODAL DE EDICIÓN ---
             if (interaction.customId.startsWith('edit_compo_modal_')) {
+                // Primero, respondemos a Discord para que no se quede "pensando"
+                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+                
                 const compoId = interaction.customId.split('_')[3];
                 if (!db) return interaction.editReply('Error: La base de datos no está disponible.');
                 const docRef = doc(db, `artifacts/${appId}/public/data/compos`, compoId);
@@ -466,13 +460,26 @@ client.on(Events.InteractionCreate, async interaction => {
                 const newContent = interaction.fields.getTextInputValue('compo_content_edit');
                 
                 try {
+                    // Ahora, intentamos guardar los cambios en la base de datos
                     await updateDoc(docRef, { name: newName, content: newContent });
+                    // Si todo va bien, enviamos la confirmación
                     await interaction.editReply(`✅ Template **${newName}** actualizado correctamente.`);
                 } catch(error) {
+                    // Si algo falla, se lo decimos al usuario
                     console.error("Error al actualizar la compo en Firebase:", error);
                     await interaction.editReply("Hubo un error al guardar los cambios en la base de datos.");
                 }
-                return;
+                return; // Fin de la lógica de edición
+            }
+
+            try {
+                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+            } catch (error) {
+                if (error.code === 10062) {
+                    console.warn(`Interacción de Modal ignorada (cold start): ${interaction.customId}`);
+                    return;
+                }
+                throw error;
             }
             
             if (interaction.customId === 'add_compo_modal') {
