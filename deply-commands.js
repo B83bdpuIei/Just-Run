@@ -1,5 +1,5 @@
 const { REST, Routes } = require('discord.js');
-// Seguramente tengas un archivo config.json, si no, pon aquí los datos directamente.
+// Asegúrate de tener tu archivo config.json o pon aquí los datos.
 const { clientId, guildId, token } = require('./config.json');
 
 const commands = [
@@ -14,10 +14,6 @@ const commands = [
     {
         name: 'delete_comp',
         description: 'Elimina una plantilla de composición de party existente.'
-    },
-    {
-        name: 'edit_compo',
-        description: 'Edita una plantilla de composición de party existente.'
     },
     {
         name: 'remove_user_compo',
